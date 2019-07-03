@@ -5,6 +5,10 @@ library(ggridges)
 library(tm)
 library(proxy)
 library(wordcloud) # take this out of final analysis
+library(fpc)
+library(cluster)
+library(tidytext)
+library(GGally)
 
 ted_data <- read.csv('Data/ted_main.csv', sep=',', header=TRUE, stringsAsFactors = FALSE) %>% 
   distinct() %>%
@@ -34,6 +38,10 @@ ggplot(ted_data, aes(x=languages, y=log(views))) + # by film date
   geom_jitter() +
   geom_smooth()
 
+ggplot(ted_data, aes(x=log(comments), y=log(views))) + # by film date
+  geom_jitter() +
+  geom_smooth()
+
 ted_data %>% gather('date_type', 'date', c('film_date', 'published_date')) %>%
   ggplot(aes(x=date, y=languages, colour=date_type)) + # by film date
   geom_jitter(size=0.5)
@@ -46,6 +54,8 @@ ggplot(ted_data, aes(x=film_date)) + # by film date
 ggplot(ted_data, aes(x=published_date)) + # by film date
   geom_histogram(bins=60)
 ggplot(ted_data, aes(x=log(views))) + # by film date
+  geom_histogram(bins=50)
+ggplot(ted_data, aes(x=languages)) + # by film date
   geom_histogram(bins=50)
 
 # analyse ratings
@@ -126,135 +136,14 @@ ratings_temp %>% right_join(select(ted_data, talk_id, views), by='talk_id') %>%
 ratings_temp %>% mutate(rating = log(rating)) %>% spread(characteristic, rating) %>% select(-talk_id) %>% 
   pairs(pch=19)
 
-library(GGally)
 ratings_temp %>% mutate(rating = log(rating)) %>% spread(characteristic, rating) %>% select(-talk_id) %>% 
   ggpairs() #+ ggtitle("Anderson's Iris Data -- 3 species")
 
-#########
-# look at transcript data
-#########
+#######
+### text analysis
+######
 
-count(ted_transcripts)
-ted_transcripts <- mutate(ted_transcripts, transcript = tolower(transcript)) %>% # change all to lower case
-  left_join(select(ted_data, talk_id, url), by='url')
-rownames(ted_transcripts) = ted_transcripts$talk_id
-
-ted_corpus <- Corpus(VectorSource(ted_transcripts$transcript)) %>% # convert to corpus
-  tm_map(removeWords, stopwords("english")) %>% # clean up
-  tm_map(removePunctuation) %>%
-  tm_map(stripWhitespace)
-
-summary(ted_corpus)
-ted_corpus[[6]]$content # check if everything is fine
-
-# convert to document term matrix
-ted_dtm <- DocumentTermMatrix(ted_corpus)
-
-sparse_ted_dtm <- removeSparseTerms(ted_dtm, sparse=0.95)
-mat <- as.matrix(sparse_ted_dtm)
-docsdissim <- dist(scale(mat))
-
-h <- hclust(docsdissim, method = "ward.D")
-plot(h, cex=0.8, hang=0.1)
-
-# cluster into 5 groups (by making cut)
-cuts <- cutree(h, 5)
-clusters <- data.frame(cuts) %>%
-  mutate(talk_id = ted_transcripts$talk_id) %>%
-  left_join(ted_transcripts, by='talk_id')
-
-# view word clouds by clusters
-wordclud_by_cluster <- function(cluster, word_freq) {
-  cx <- filter(clusters, cuts == cluster)
-  cx_corpus <- Corpus(VectorSource(cx$transcript)) %>% # convert to corpus
-    tm_map(removeWords, stopwords("english")) %>% # clean up
-    tm_map(removePunctuation) %>%
-    tm_map(stripWhitespace)
-  cx_dtm <- DocumentTermMatrix(cx_corpus)
-  ft <- colSums(as.matrix(cx_dtm))
-  df <- data.frame(word=names(ft), freq=ft)
-  set.seed(142)   
-  wordcloud(df$word, df$freq, min.freq=word_freq)
-}
-
-wordclud_by_cluster(1, 500)
-wordclud_by_cluster(5, 200)
-
-# k-means clustering
-library(fpc)   
-library(cluster)
-
-ted_dtm <- DocumentTermMatrix(ted_corpus)
-
-sparse_ted_dtm <- removeSparseTerms(ted_dtm, sparse=0.95)
-mat <- as.matrix(sparse_ted_dtm)
-docsdissim <- dist(scale(mat))
-
-kfit <- kmeans(docsdissim, 3)   
-clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)   
-
-
-# cluster by keywords
-
-names(ted_data)
-
-tag_corpus <- Corpus(VectorSource(ted_data$tags)) %>% # convert to corpus
-  tm_map(removeWords, stopwords("english")) %>% # clean up
-  tm_map(removePunctuation) %>%
-  tm_map(stripWhitespace) %>%
-  tm_map(removeWords, c('tedx', 'fellow', 'ted'))
-
-tag_dtm <- DocumentTermMatrix(tag_corpus)
-
-sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
-mat <- as.matrix(sparse_tag_dtm)
-docsdissim <- dist(scale(mat))
-
-set.seed(1298)
-kfit <- kmeans(docsdissim, 10)   
-clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)
-
-# look at most frequent terms
-tag_freq <- colSums(as.matrix(tag_dtm))
-
-tag_freq_df <- data.frame(word=names(tag_freq), freq=tag_freq)
-
-ggplot(subset(tag_freq_df, freq>100), aes(x = reorder(word, -freq), y = freq)) +
-  geom_bar(stat = "identity") + 
-  theme(axis.text.x=element_text(angle=45, hjust=1))
-
-
-
-# hierarchical clustering on tags
-sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
-mat <- as.matrix(sparse_tag_dtm)
-docsdissim <- dist(scale(mat))
-
-h <- hclust(docsdissim, method = "ward.D")
-plot(h, cex=0.5, hang=0.1)
-
-cuts <- cutree(h, 10)
-clusters <- data.frame(cuts) %>%
-  mutate(talk_id = ted_data$talk_id) %>%
-  left_join(ted_data, by='talk_id') %>%
-  mutate(cluster = paste('group', as.character(cuts)),
-         views = as.double(views))
-
-clusters %>% 
-  ggplot(aes(x=views, y=reorder(cluster, views), fill = ..x..)) +
-  geom_density_ridges_gradient() +
-  scale_fill_continuous()
-
-# ggplot(clusters, aes(x=cluster, y=views)) + geom_boxplot()
-
-cluster_summary <- clusters %>% 
-  group_by(cluster) %>% 
-  mutate(mean = mean(views), std = sd(views), count = n()) %>%
-  ungroup() %>% 
-  select(cluster, mean, std, count) %>%
-  distinct()
-
-# plot word counts by cluster
+# function for plot
 wordfreq_by_cluster <- function(n_cluster, top_words) {
   data_temp <- filter(clusters, cuts == n_cluster)
   temp_corpus <- Corpus(VectorSource(data_temp$tags)) %>% # convert to corpus
@@ -269,12 +158,100 @@ wordfreq_by_cluster <- function(n_cluster, top_words) {
   temp_freq_df <- data.frame(word=names(temp_freq), freq=temp_freq) %>%
     arrange(freq) %>%
     top_n(top_words)
-
+  
   ggplot(subset(temp_freq_df), aes(x = reorder(word, -freq), y = freq)) +
     geom_bar(stat = "identity") + 
     theme(axis.text.x=element_text(angle=45, hjust=1))
-  }
+}
 
+# prepare data
+names(ted_data)
+
+tag_corpus <- Corpus(VectorSource(ted_data$tags)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(removeWords, c('tedx', 'fellow', 'ted'))
+
+tag_dtm <- DocumentTermMatrix(tag_corpus)
+
+# look at most frequent terms
+tag_freq <- colSums(as.matrix(tag_dtm))
+
+tag_freq_df <- data.frame(word=names(tag_freq), freq=tag_freq)
+
+ggplot(subset(tag_freq_df, freq>100), aes(x = reorder(word, -freq), y = freq)) +
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+# cluster by keywords
+
+# k-means --> probably won't use as there seems to be more overlap!!
+sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
+mat <- as.matrix(sparse_tag_dtm)
+docsdissim <- dist(scale(mat))
+set.seed(1234)
+kfit <- kmeans(docsdissim, 5)   
+#clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+
+clusters <- data.frame(tags=ted_data$tags, cuts=kfit$cluster, views=ted_data$views) %>%
+  mutate(cluster = paste('group', cuts))
+
+# look at views across clusters
+clusters %>% 
+  ggplot(aes(x=views, y=reorder(cluster, views))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+# get summary
+cluster_summary_k <- clusters %>% 
+  group_by(cluster) %>% 
+  mutate(mean = mean(views), std = sd(views), count = n()) %>%
+  ungroup() %>% 
+  select(cluster, mean, std, count) %>%
+  distinct()
+
+# plot top word frequencies
+wordfreq_by_cluster(1, 30)
+wordfreq_by_cluster(2, 30)
+wordfreq_by_cluster(3, 30)
+wordfreq_by_cluster(4, 30)
+wordfreq_by_cluster(5, 30)
+
+
+# hierarchical clustering on tags
+sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
+mat <- as.matrix(sparse_tag_dtm)
+docsdissim <- dist(scale(mat))
+
+h <- hclust(docsdissim, method = "ward.D")
+#plot(h, cex=0.5, hang=0.1)
+
+cuts <- cutree(h, 5)
+clusters <- data.frame(cuts) %>%
+  mutate(talk_id = ted_data$talk_id) %>%
+  left_join(ted_data, by='talk_id') %>%
+  mutate(cluster = paste('group', as.character(cuts)),
+         views = as.double(views))
+
+clusters_final <- clusters
+
+clusters %>% 
+  ggplot(aes(x=views, y=reorder(cluster, views))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+# ggplot(clusters, aes(x=cluster, y=views)) + geom_boxplot()
+
+# get summary
+cluster_summary_h <- clusters %>% 
+  group_by(cluster) %>% 
+  mutate(mean = mean(views), std = sd(views), count = n()) %>%
+  ungroup() %>% 
+  select(cluster, mean, std, count) %>%
+  distinct()
+
+# plot word counts by cluster
 wordfreq_by_cluster(1, 30)
 wordfreq_by_cluster(2, 30)
 wordfreq_by_cluster(3, 30)
@@ -283,7 +260,7 @@ wordfreq_by_cluster(5, 30)
 #wordfreq_by_cluster(6, 30)
 #wordfreq_by_cluster(7, 30)
 
-
+# explore variables by h clusters
 ggplot(clusters, aes(x=film_date, y=log(views), colour=cluster)) + # by film date
   geom_point()
 
@@ -303,8 +280,8 @@ ggplot(data_temp, aes(x=rating, y=log(views))) +
 
 ggplot(data_temp, aes(x=characteristic, y=rating, fill=cluster)) +
   geom_boxplot() + 
-  theme(axis.text.x=element_text(angle=45, hjust=1))
-
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  coord_flip()
 
 ggplot(data_temp, aes(x=characteristic, y=rating)) +
   geom_boxplot() + 
@@ -321,6 +298,9 @@ ggplot(data_temp, aes(y=reorder(characteristic, rating_ln), x=rating_ln)) +
   geom_density_ridges_gradient() + 
   theme(axis.text.x=element_text(angle=45, hjust=1)) +
   facet_grid(~cluster, scales = 'fixed') 
+
+ggplot(data_temp, aes(y=reorder(characteristic, rating_ln), x=rating_ln, fill=cluster)) +
+  geom_density_ridges_gradient()
 
 ggplot(data_temp, aes(x=rating)) +
   geom_histogram(bins=30) + 
@@ -339,7 +319,7 @@ ggplot(data_temp, aes(x=rating, y=log(views), colour=cluster)) +
   facet_wrap(~characteristic, scales = 'free') 
 
 
-# titles
+# most frequent words in titles
 title_corpus <- Corpus(VectorSource(ted_data$title)) %>% # convert to corpus
   tm_map(removeWords, stopwords("english")) %>% # clean up
   tm_map(removePunctuation) %>%
@@ -356,3 +336,188 @@ ggplot(subset(title_freq_df, freq>=20), aes(x = reorder(word, -freq), y = freq))
   geom_bar(stat = "identity") + 
   theme(axis.text.x=element_text(angle=45, hjust=1))
 
+#########
+# look at transcript data
+#########
+
+# word frequency
+count(ted_transcripts)
+ted_transcripts <- mutate(ted_transcripts, transcript = tolower(transcript)) %>% # change all to lower case
+  left_join(select(ted_data, talk_id, url), by='url')
+rownames(ted_transcripts) = ted_transcripts$talk_id
+
+ted_corpus <- Corpus(VectorSource(ted_transcripts$transcript)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+
+#summary(ted_corpus)
+#ted_corpus[[6]]$content # check if everything is fine
+
+# convert to document term matrix
+ted_dtm <- DocumentTermMatrix(ted_corpus)
+
+sparse_ted_dtm <- removeSparseTerms(ted_dtm, sparse=0.95)
+mat <- as.matrix(sparse_ted_dtm)
+docsdissim <- dist(scale(mat))
+
+h <- hclust(docsdissim, method = "ward.D")
+#plot(h, cex=0.8, hang=0.1)
+
+# cluster into 5 groups (by making cut)
+cuts <- cutree(h, 5)
+clusters <- data.frame(cuts) %>%
+  mutate(talk_id = ted_transcripts$talk_id) %>%
+  left_join(ted_transcripts, by='talk_id') %>%
+  left_join(ted_data, by='talk_id')
+
+# view word clouds by clusters
+wordcloud_by_cluster <- function(cluster, word_freq) {
+  cx <- filter(clusters, cuts == cluster)
+  cx_corpus <- Corpus(VectorSource(cx$transcript)) %>% # convert to corpus
+    tm_map(removeWords, stopwords("english")) %>% # clean up
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace)
+  cx_dtm <- DocumentTermMatrix(cx_corpus)
+  ft <- colSums(as.matrix(cx_dtm))
+  df <- data.frame(word=names(ft), freq=ft)
+  set.seed(142)   
+  wordcloud(df$word, df$freq, min.freq=word_freq)
+}
+
+wordcloud_by_cluster(1, 500)
+wordcloud_by_cluster(2, 500)
+wordcloud_by_cluster(3, 500)
+wordcloud_by_cluster(4, 500)
+wordcloud_by_cluster(5, 150)
+
+# most common tags in transcript hierarchical clusters
+wordfreq_by_cluster(1, 30)
+wordfreq_by_cluster(2, 30)
+wordfreq_by_cluster(3, 30)
+wordfreq_by_cluster(4, 30)
+wordfreq_by_cluster(5, 30)
+
+# k-means clustering
+ted_dtm <- DocumentTermMatrix(ted_corpus)
+
+sparse_ted_dtm <- removeSparseTerms(ted_dtm, sparse=0.95)
+mat <- as.matrix(sparse_ted_dtm)
+docsdissim <- dist(scale(mat))
+
+kfit <- kmeans(docsdissim, 5)   
+#clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)   
+
+clusters <- data.frame(cuts = kfit$cluster, talk_id = ted_transcripts$talk_id) %>%
+  left_join(ted_transcripts, by='talk_id') %>%
+  left_join(ted_data, by='talk_id')
+
+
+#wordcloud_by_cluster(1, 500)
+#wordcloud_by_cluster(2, 500)
+#wordcloud_by_cluster(3, 500)
+#wordcloud_by_cluster(4, 500)
+#wordcloud_by_cluster(5, 150)
+
+# most common tags in transcript k-means clusters
+wordfreq_by_cluster(1, 30)
+wordfreq_by_cluster(2, 30)
+wordfreq_by_cluster(3, 30)
+wordfreq_by_cluster(4, 30)
+wordfreq_by_cluster(5, 30)
+
+##########
+# sentiment analysis of transcripts
+##########
+
+rownames(ted_transcripts) <- ted_transcripts$talk_id
+
+ted_corpus <- VCorpus(VectorSource(ted_transcripts$transcript)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+
+ted_txt <- tidytext::tidy(ted_corpus) %>%
+  mutate(talk_id = ted_transcripts$talk_id)
+
+# calculate occurence of positive/negative sentiment 
+get_sentiment <- function(row_n){
+  temp_txt <- ted_txt[row_n,]
+  tidy_temp_text <- temp_txt %>%
+    select(text, id) %>%
+    group_by(id) %>% 
+    unnest_tokens(word, text) %>%
+    ungroup() %>% # you can experiment with not including this when you compute count()
+    anti_join(stop_words, by='word') 
+  
+  temp_result <- tidy_temp_text %>%
+    inner_join(get_sentiments("bing"), by='word') %>%
+    count(id, sentiment, word) %>%
+    ungroup() %>%
+    group_by(sentiment) %>%
+    summarize(words = sum(n)) %>%
+    mutate(id = row_n)
+  return(temp_result)
+}
+
+ted_sentiment <- get_sentiment(1)
+
+# run across all transcripts
+for (i in c(2:as.integer(count(ted_txt)))){
+  data_temp <- get_sentiment(i)
+  ted_sentiment <- rbind(ted_sentiment, data_temp)
+}
+
+ted_sentiment <- ted_sentiment %>%
+  spread(sentiment, words)
+
+ted_sentiment[is.na(ted_sentiment)] <- 0
+
+ted_data_sentiment <- ted_sentiment %>%
+  left_join(mutate(ted_txt, id=as.integer(id)), by='id') %>%
+  select(talk_id, negative, positive, language) %>%
+  mutate(perc.pos = positive/(positive+negative)*100,
+         perc.neg = negative/(positive+negative)*100) %>%
+  left_join(ted_data, by='talk_id')
+
+# plot sentiment and views
+ted_data_sentiment %>% gather('sentiment', 'count', c(positive, negative)) %>%
+  ggplot(aes(x=count, y=log(views), colour=sentiment)) +
+  geom_jitter(size=0.8)
+
+ted_data_sentiment %>% 
+  ggplot(aes(x=perc.pos, y=log(views))) +
+  geom_point()
+
+ted_data_sentiment %>% 
+  ggplot(aes(x=positive, y=log(comments))) +
+  geom_point()
+
+# plot sentiment and ratings
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  ggplot(aes(x=rating, y=perc.pos)) +
+  geom_point(size=0.8) +
+  geom_smooth(method='lm') +
+  facet_wrap(~characteristic, scales = 'free')
+
+# look at sentiment by clusters (tags, hierarchical)
+ted_data_sentiment %>% left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  group_by(cluster) %>%
+  mutate(cluster.pos = sum(positive),
+         cluster.neg = sum(negative),
+         mean.perc.pos = mean(perc.pos),
+         mean.perc.neg = mean(perc.neg)) %>%
+  ungroup() %>%
+  select(cluster, cluster.pos, cluster.neg, mean.perc.pos, mean.perc.neg) %>%
+  distinct()
+
+clusters_final %>% group_by(cluster) %>% 
+  mutate(views.mean = mean(views),
+         views.sd = sd(views),
+         comments.mean = mean(comments),
+         comments.sd = sd(comments),
+         languages.mean = mean(languages),
+         languages.sd = sd(languages)) %>%
+  ungroup() %>%
+  select(cluster, views.mean, views.sd, comments.mean, comments.sd, languages.mean, languages.sd) %>%
+  distinct()
