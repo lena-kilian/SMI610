@@ -23,7 +23,8 @@ names(ted_data)
 ted_data <- ted_data %>%
   mutate(film_date = as_datetime(film_date),
          published_date = as_datetime(published_date),
-         talk_id = c(1:as.integer(count(ted_data))))
+         talk_id = c(1:as.integer(count(ted_data)))) %>%
+  mutate(title_length = nchar(title))# add string length of title
 
 # look at views over time
 ggplot(ted_data, aes(x=film_date, y=log(views))) + # by film date
@@ -34,11 +35,15 @@ ggplot(ted_data, aes(x=published_date, y=views)) + # by published date
 
 
 # explore other variables
-ggplot(ted_data, aes(x=languages, y=log(views))) + # by film date
+ggplot(ted_data, aes(x=languages, y=log(views))) + # by number of languages
   geom_jitter() +
   geom_smooth()
 
-ggplot(ted_data, aes(x=log(comments), y=log(views))) + # by film date
+ggplot(ted_data, aes(x=title_length, y=log(views))) + # by title length
+  geom_jitter() +
+  geom_smooth()
+
+ggplot(ted_data, aes(x=log(comments), y=log(views))) + # by number of comments
   geom_jitter() +
   geom_smooth()
 
@@ -158,7 +163,7 @@ wordfreq_by_cluster <- function(n_cluster, top_words) {
   temp_freq_df <- data.frame(word=names(temp_freq), freq=temp_freq) %>%
     arrange(freq) %>%
     top_n(top_words)
-  
+
   ggplot(subset(temp_freq_df), aes(x = reorder(word, -freq), y = freq)) +
     geom_bar(stat = "identity") + 
     theme(axis.text.x=element_text(angle=45, hjust=1))
@@ -194,7 +199,8 @@ set.seed(1234)
 kfit <- kmeans(docsdissim, 5)   
 #clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)
 
-clusters <- data.frame(tags=ted_data$tags, cuts=kfit$cluster, views=ted_data$views) %>%
+clusters <- data.frame(cuts=kfit$cluster, talk_id=ted_data$talk_id) %>%
+  left_join(ted_data, by='talk_id') %>%
   mutate(cluster = paste('group', cuts))
 
 # look at views across clusters
@@ -202,6 +208,36 @@ clusters %>%
   ggplot(aes(x=views, y=reorder(cluster, views))) +
   geom_density_ridges_gradient() +
   scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=comments, y=reorder(cluster, comments))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=languages, y=reorder(cluster, languages))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=duration, y=reorder(cluster, duration))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=title_length, y=reorder(cluster, title_length))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>%
+  ggplot(aes(x=published_date)) +
+  geom_histogram(bins=25) +
+  facet_wrap(~cluster)
+
+clusters %>%
+  ggplot(aes(x=film_date)) +
+  geom_histogram(bins=25) +
+  facet_wrap(~cluster)
 
 # get summary
 cluster_summary_k <- clusters %>% 
@@ -212,11 +248,11 @@ cluster_summary_k <- clusters %>%
   distinct()
 
 # plot top word frequencies
-wordfreq_by_cluster(1, 30)
-wordfreq_by_cluster(2, 30)
-wordfreq_by_cluster(3, 30)
-wordfreq_by_cluster(4, 30)
-wordfreq_by_cluster(5, 30)
+#wordfreq_by_cluster(1, 30)
+#wordfreq_by_cluster(2, 30)
+#wordfreq_by_cluster(3, 30)
+#wordfreq_by_cluster(4, 30)
+#wordfreq_by_cluster(5, 30)
 
 
 # hierarchical clustering on tags
@@ -270,6 +306,41 @@ ggplot(clusters, aes(x=languages, y=log(views), colour=cluster)) + # by film dat
 ggplot(clusters, aes(x=published_date, y=log(views), colour=cluster)) + # by film date
   geom_point()
 
+clusters %>% 
+  ggplot(aes(x=views, y=reorder(cluster, views))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=comments, y=reorder(cluster, comments))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=languages, y=reorder(cluster, languages))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=duration, y=reorder(cluster, duration))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>% 
+  ggplot(aes(x=title_length, y=reorder(cluster, title_length))) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous()
+
+clusters %>%
+  ggplot(aes(x=published_date)) +
+  geom_histogram(bins=25) +
+  facet_wrap(~cluster)
+
+clusters %>%
+  ggplot(aes(x=film_date)) +
+  geom_histogram(bins=25) +
+  facet_wrap(~cluster)
+
 data_temp <- ratings_temp %>% left_join(select(clusters, views, cluster, languages, talk_id), by='talk_id') %>%
   mutate(rating_ln = log(rating + 0.001))
 
@@ -298,6 +369,11 @@ ggplot(data_temp, aes(y=reorder(characteristic, rating_ln), x=rating_ln)) +
   geom_density_ridges_gradient() + 
   theme(axis.text.x=element_text(angle=45, hjust=1)) +
   facet_grid(~cluster, scales = 'fixed') 
+
+ggplot(data_temp, aes(y=cluster, x=rating_ln)) +
+  geom_density_ridges_gradient() + 
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  facet_grid(~characteristic, scales = 'fixed')
 
 ggplot(data_temp, aes(y=reorder(characteristic, rating_ln), x=rating_ln, fill=cluster)) +
   geom_density_ridges_gradient()
@@ -385,11 +461,11 @@ wordcloud_by_cluster <- function(cluster, word_freq) {
   wordcloud(df$word, df$freq, min.freq=word_freq)
 }
 
-wordcloud_by_cluster(1, 500)
-wordcloud_by_cluster(2, 500)
-wordcloud_by_cluster(3, 500)
-wordcloud_by_cluster(4, 500)
-wordcloud_by_cluster(5, 150)
+#wordcloud_by_cluster(1, 500)
+#wordcloud_by_cluster(2, 500)
+#wordcloud_by_cluster(3, 500)
+#wordcloud_by_cluster(4, 500)
+#wordcloud_by_cluster(5, 150)
 
 # most common tags in transcript hierarchical clusters
 wordfreq_by_cluster(1, 30)
@@ -521,3 +597,19 @@ clusters_final %>% group_by(cluster) %>%
   ungroup() %>%
   select(cluster, views.mean, views.sd, comments.mean, comments.sd, languages.mean, languages.sd) %>%
   distinct()
+
+### look at relationships
+
+# percentage ratings
+clusters_final1 <- left_join(clusters_final, ratings_percent, by='talk_id') %>% 
+  spread(cluster, cuts) %>%
+  mutate(`group 1` = ifelse(is.na(`group 1`), 0, 1),
+         `group 2` = ifelse(is.na(`group 2`), 0, 1), 
+         `group 3` = ifelse(is.na(`group 3`), 0, 1), 
+         `group 4` = ifelse(is.na(`group 4`), 0, 1), 
+         `group 5` = ifelse(is.na(`group 5`), 0, 1))
+nums <- unlist(lapply(clusters_final1, is.numeric))  
+data_temp <- clusters_final1[ , nums]
+
+cor_data <- data.frame(cor(data_temp, method = c("pearson")))
+
