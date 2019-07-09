@@ -24,7 +24,8 @@ ted_data <- ted_data %>%
   mutate(film_date = as_datetime(film_date),
          published_date = as_datetime(published_date),
          talk_id = c(1:as.integer(count(ted_data)))) %>%
-  mutate(title_length = nchar(title))# add string length of title
+  mutate(title_length = nchar(title), # add string length of title
+         comments_per_view = comments/views) # add comments per view
 
 # look at views over time
 ggplot(ted_data, aes(x=film_date, y=log(views))) + # by film date
@@ -38,6 +39,18 @@ ggplot(ted_data, aes(x=published_date, y=views)) + # by published date
 ggplot(ted_data, aes(x=languages, y=log(views))) + # by number of languages
   geom_jitter() +
   geom_smooth()
+
+ggplot(ted_data, aes(x=comments_per_view.log, y=log(views))) + # by comments per view
+  geom_jitter()
+
+ggplot(ted_data, aes(x=log(comments_per_view))) +
+  geom_histogram()
+
+ggplot(ted_data, aes(x=log(views))) +
+  geom_histogram()
+
+ggplot(ted_data, aes(x=log(comments))) +
+  geom_histogram()
 
 ggplot(ted_data, aes(x=title_length, y=log(views))) + # by title length
   geom_jitter() +
@@ -613,3 +626,178 @@ data_temp <- clusters_final1[ , nums]
 
 cor_data <- data.frame(cor(data_temp, method = c("pearson")))
 
+
+left_join(ted_data_sentiment, select(clusters_final, talk_id, cluster), by='talk_id') %>%
+  ggplot(aes(x=cluster, y=perc.pos)) +
+  geom_boxplot()
+
+ggplot(ted_data_sentiment, aes(x=perc.pos)) +
+  geom_histogram()
+
+left_join(ted_data_sentiment, select(clusters_final, talk_id, cluster), by='talk_id') %>%
+  ggplot(aes(x=cluster, y=positive)) +
+  geom_boxplot()
+
+
+
+  
+wordfreq_by_cluster.transcript <- function(n_cluster, top_words) {
+  data_temp <-  left_join(ted_transcripts, select(clusters_final, talk_id, cuts), by='talk_id')%>% 
+    filter(cuts == n_cluster)
+  temp_corpus <- Corpus(VectorSource(data_temp$transcript)) %>% # convert to corpus
+    tm_map(removeWords, stopwords("english")) %>% # clean up
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace) %>% tm_map(removeWords, c('<U+266A>', '<U+266B>'))
+  
+  temp_dtm <- DocumentTermMatrix(temp_corpus)
+  temp_freq <- colSums(as.matrix(temp_dtm))
+  
+  temp_freq_df <- data.frame(word=names(temp_freq), freq=temp_freq) %>%
+    arrange(-freq) %>%
+    top_n(top_words, freq) %>%
+    mutate(cuts = n_cluster)
+  return(temp_freq_df)
+}
+
+wordfreq_by_cluster.transcript.plot <- function(temp_freq_df, top_words) {
+  temp_freq_df %>% top_n(top_words, freq) %>%
+  ggplot(aes(x = reorder(word, -freq), y = freq)) +
+    geom_bar(stat = "identity") + 
+    theme(axis.text.x=element_text(angle=45, hjust=1))
+}
+
+
+
+
+c1.transcriptfreq <- wordfreq_by_cluster.transcript(1, 150)
+wordfreq_by_cluster.transcript.plot(c1.transcriptfreq, 30)
+
+c2.transcriptfreq <- wordfreq_by_cluster.transcript(2, 150)
+wordfreq_by_cluster.transcript.plot(c2.transcriptfreq, 30)
+
+c3.transcriptfreq <- wordfreq_by_cluster.transcript(3, 150)
+wordfreq_by_cluster.transcript.plot(c3.transcriptfreq, 30)
+
+c4.transcriptfreq <- wordfreq_by_cluster.transcript(4, 150)
+wordfreq_by_cluster.transcript.plot(c4.transcriptfreq, 30)
+
+c5.transcriptfreq <- wordfreq_by_cluster.transcript(5, 150)
+wordfreq_by_cluster.transcript.plot(c5.transcriptfreq, 30)
+
+cX.transcriptfreq <- rbind(c1.transcriptfreq, c2.transcriptfreq, c3.transcriptfreq, 
+                           c4.transcriptfreq, c5.transcriptfreq)
+
+
+plot.ranks <- function(df1, df2){
+  df1 <- df1 %>%
+    mutate(rank = c(1:as.integer(count(df1))))
+  df2 <- df2 %>%
+    mutate(rank = c(1:as.integer(count(df2))))
+  transcriptfreq <- full_join(select(df1, -freq, -cuts), select(df2, -freq, -cuts), by='word')
+  #transcriptfreq[is.na(transcriptfreq)] <- 0
+  ggplot(transcriptfreq, aes(x=transcriptfreq[[2]], y=transcriptfreq[[3]])) +
+    geom_point() +
+    geom_smooth(method='lm')
+}
+
+
+plot.ranks(c1.transcriptfreq, c2.transcriptfreq)
+plot.ranks(c1.transcriptfreq, c3.transcriptfreq)
+plot.ranks(c1.transcriptfreq, c4.transcriptfreq)
+plot.ranks(c1.transcriptfreq, c5.transcriptfreq)
+
+plot.ranks(c2.transcriptfreq, c3.transcriptfreq)
+plot.ranks(c2.transcriptfreq, c4.transcriptfreq)
+plot.ranks(c2.transcriptfreq, c5.transcriptfreq)
+
+plot.ranks(c3.transcriptfreq, c4.transcriptfreq)
+plot.ranks(c3.transcriptfreq, c5.transcriptfreq)
+
+plot.ranks(c4.transcriptfreq, c5.transcriptfreq)
+
+
+spearman_rho.transcriptfreq <- function(df1, df2){
+  df1 <- spread(df1, cuts, freq)
+  df2 <- spread(df2, cuts, freq)
+  temp_df <- full_join(df1, df2, by='word')
+  temp_df[is.na(temp_df)] <- 0
+  spr.cor <- cor.test(temp_df[[2]], temp_df[[3]], method="spearman")
+  return(spr.cor)
+}
+
+spearman_rho.transcriptfreq(c1.transcriptfreq, c2.transcriptfreq)
+spearman_rho.transcriptfreq(c1.transcriptfreq, c3.transcriptfreq)
+spearman_rho.transcriptfreq(c1.transcriptfreq, c4.transcriptfreq)
+spearman_rho.transcriptfreq(c1.transcriptfreq, c5.transcriptfreq)
+
+spearman_rho.transcriptfreq(c2.transcriptfreq, c3.transcriptfreq)
+spearman_rho.transcriptfreq(c2.transcriptfreq, c4.transcriptfreq)
+spearman_rho.transcriptfreq(c2.transcriptfreq, c5.transcriptfreq)
+
+spearman_rho.transcriptfreq(c3.transcriptfreq, c4.transcriptfreq)
+spearman_rho.transcriptfreq(c3.transcriptfreq, c5.transcriptfreq)
+
+spearman_rho.transcriptfreq(c4.transcriptfreq, c5.transcriptfreq)
+
+
+
+####
+## TF-IDF analysis
+# https://www.tidytextmining.com/tfidf.html
+######
+
+transcript_words <- ted_transcripts %>%
+  select(-url) %>%
+  unnest_tokens(word, transcript) %>%
+  count(talk_id, word, sort = TRUE) %>%
+  group_by(talk_id) %>%
+  mutate(transcript_total = sum(n)) %>%
+  ungroup() %>%
+  left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  group_by(cluster) %>%
+  mutate(cluster_total = sum(n)) %>%
+  ungroup()
+
+# word appearance by clusters
+ggplot(transcript_words, aes(n/cluster_total, fill = cluster)) +
+  geom_histogram(show.legend = FALSE) +
+  xlim(NA, 0.0009) +
+  facet_wrap(~cluster, ncol = 2, scales = "free_y")
+
+# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
+freq_by_rank <- transcript_words %>% 
+  group_by(talk_id) %>% 
+  mutate(rank = row_number(), 
+         term_frequency = n/transcript_total)
+
+# Zipf's law for ted talks (by cluster)
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_point(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# Zipf's law for ted talks (by talk) --> DOES NOT RUN!! FREEZES EVERYTHING
+#freq_by_rank %>% 
+#  ggplot(aes(rank, term_frequency, colour=talk_id)) + 
+#  geom_line(size=0.8, alpha=0.5, show.legend=FALSE) + 
+#  scale_x_log10() +
+#  scale_y_log10()
+
+# We see that transcripts are similar to each other, and that the relationship between rank and frequency has a negative slope
+# It is not quite constant, though; perhaps we could view this as a broken power law with, say, three sections. 
+# Let's see what the exponent of the power law is for the middle section of the rank range.
+rank_subset <- freq_by_rank %>% 
+  filter(rank < 500)
+
+# fit power law line
+pl <- lm(log10(term_frequency) ~ log10(rank), data = rank_subset)
+
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
+  geom_point(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+## 3.3 The bind_tf_idf function
