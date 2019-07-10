@@ -205,60 +205,60 @@ ggplot(subset(tag_freq_df, freq>100), aes(x = reorder(word, -freq), y = freq)) +
 # cluster by keywords
 
 # k-means --> probably won't use as there seems to be more overlap!!
-sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
-mat <- as.matrix(sparse_tag_dtm)
-docsdissim <- dist(scale(mat))
-set.seed(1234)
-kfit <- kmeans(docsdissim, 5)   
+#sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
+#mat <- as.matrix(sparse_tag_dtm)
+#docsdissim <- dist(scale(mat))
+#set.seed(1234)
+#kfit <- kmeans(docsdissim, 5)   
 #clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)
 
-clusters <- data.frame(cuts=kfit$cluster, talk_id=ted_data$talk_id) %>%
-  left_join(ted_data, by='talk_id') %>%
-  mutate(cluster = paste('group', cuts))
+#clusters <- data.frame(cuts=kfit$cluster, talk_id=ted_data$talk_id) %>%
+#  left_join(ted_data, by='talk_id') %>%
+#  mutate(cluster = paste('group', cuts))
 
 # look at views across clusters
-clusters %>% 
-  ggplot(aes(x=views, y=reorder(cluster, views))) +
-  geom_density_ridges_gradient() +
-  scale_fill_continuous()
+#clusters %>% 
+#  ggplot(aes(x=views, y=reorder(cluster, views))) +
+#  geom_density_ridges_gradient() +
+#  scale_fill_continuous()
 
-clusters %>% 
-  ggplot(aes(x=comments, y=reorder(cluster, comments))) +
-  geom_density_ridges_gradient() +
-  scale_fill_continuous()
+#clusters %>% 
+#  ggplot(aes(x=comments, y=reorder(cluster, comments))) +
+#  geom_density_ridges_gradient() +
+#  scale_fill_continuous()
 
-clusters %>% 
-  ggplot(aes(x=languages, y=reorder(cluster, languages))) +
-  geom_density_ridges_gradient() +
-  scale_fill_continuous()
+#clusters %>% 
+#  ggplot(aes(x=languages, y=reorder(cluster, languages))) +
+#  geom_density_ridges_gradient() +
+#  scale_fill_continuous()
+#
+#clusters %>% 
+#  ggplot(aes(x=duration, y=reorder(cluster, duration))) +
+#  geom_density_ridges_gradient() +
+#  scale_fill_continuous()
+#
+#clusters %>% 
+#  ggplot(aes(x=title_length, y=reorder(cluster, title_length))) +
+#  geom_density_ridges_gradient() +
+#  scale_fill_continuous()
+#
+#clusters %>%
+#  ggplot(aes(x=published_date)) +
+#  geom_histogram(bins=25) +
+#  facet_wrap(~cluster)
 
-clusters %>% 
-  ggplot(aes(x=duration, y=reorder(cluster, duration))) +
-  geom_density_ridges_gradient() +
-  scale_fill_continuous()
-
-clusters %>% 
-  ggplot(aes(x=title_length, y=reorder(cluster, title_length))) +
-  geom_density_ridges_gradient() +
-  scale_fill_continuous()
-
-clusters %>%
-  ggplot(aes(x=published_date)) +
-  geom_histogram(bins=25) +
-  facet_wrap(~cluster)
-
-clusters %>%
-  ggplot(aes(x=film_date)) +
-  geom_histogram(bins=25) +
-  facet_wrap(~cluster)
+#clusters %>%
+#  ggplot(aes(x=film_date)) +
+#  geom_histogram(bins=25) +
+#  facet_wrap(~cluster)
 
 # get summary
-cluster_summary_k <- clusters %>% 
-  group_by(cluster) %>% 
-  mutate(mean = mean(views), std = sd(views), count = n()) %>%
-  ungroup() %>% 
-  select(cluster, mean, std, count) %>%
-  distinct()
+#cluster_summary_k <- clusters %>% 
+#  group_by(cluster) %>% 
+#  mutate(mean = mean(views), std = sd(views), count = n()) %>%
+#  ungroup() %>% 
+#  select(cluster, mean, std, count) %>%
+#  distinct()
 
 # plot top word frequencies
 #wordfreq_by_cluster(1, 30)
@@ -488,18 +488,18 @@ wordfreq_by_cluster(4, 30)
 wordfreq_by_cluster(5, 30)
 
 # k-means clustering
-ted_dtm <- DocumentTermMatrix(ted_corpus)
+#ted_dtm <- DocumentTermMatrix(ted_corpus)
 
-sparse_ted_dtm <- removeSparseTerms(ted_dtm, sparse=0.95)
-mat <- as.matrix(sparse_ted_dtm)
-docsdissim <- dist(scale(mat))
+#sparse_ted_dtm <- removeSparseTerms(ted_dtm, sparse=0.95)
+#mat <- as.matrix(sparse_ted_dtm)
+#docsdissim <- dist(scale(mat))
 
-kfit <- kmeans(docsdissim, 5)   
+#kfit <- kmeans(docsdissim, 5)   
 #clusplot(as.matrix(docsdissim), kfit$cluster, color=T, shade=T, labels=2, lines=0)   
 
-clusters <- data.frame(cuts = kfit$cluster, talk_id = ted_transcripts$talk_id) %>%
-  left_join(ted_transcripts, by='talk_id') %>%
-  left_join(ted_data, by='talk_id')
+#clusters <- data.frame(cuts = kfit$cluster, talk_id = ted_transcripts$talk_id) %>%
+#  left_join(ted_transcripts, by='talk_id') %>%
+#  left_join(ted_data, by='talk_id')
 
 
 #wordcloud_by_cluster(1, 500)
@@ -509,14 +509,14 @@ clusters <- data.frame(cuts = kfit$cluster, talk_id = ted_transcripts$talk_id) %
 #wordcloud_by_cluster(5, 150)
 
 # most common tags in transcript k-means clusters
-wordfreq_by_cluster(1, 30)
-wordfreq_by_cluster(2, 30)
-wordfreq_by_cluster(3, 30)
-wordfreq_by_cluster(4, 30)
-wordfreq_by_cluster(5, 30)
+#wordfreq_by_cluster(1, 30)
+#wordfreq_by_cluster(2, 30)
+#wordfreq_by_cluster(3, 30)
+#wordfreq_by_cluster(4, 30)
+#wordfreq_by_cluster(5, 30)
 
 ##########
-# sentiment analysis of transcripts
+# sentiment analysis of transcripts ----> also find out how many neutral words, to get better percentage
 ##########
 
 rownames(ted_transcripts) <- ted_transcripts$talk_id
@@ -746,23 +746,26 @@ spearman_rho.transcriptfreq(c4.transcriptfreq, c5.transcriptfreq)
 # https://www.tidytextmining.com/tfidf.html
 ######
 
+ted_transcripts <- data.frame(lapply(ted_transcripts, function(x) {
+  gsub("кт", " ", x)
+  gsub("к", " ", x)
+  }))
+
 transcript_words <- ted_transcripts %>%
   select(-url) %>%
   unnest_tokens(word, transcript) %>%
   count(talk_id, word, sort = TRUE) %>%
   group_by(talk_id) %>%
   mutate(transcript_total = sum(n)) %>%
-  ungroup() %>%
-  left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
-  group_by(cluster) %>%
-  mutate(cluster_total = sum(n)) %>%
   ungroup()
 
-# word appearance by clusters
-ggplot(transcript_words, aes(n/cluster_total, fill = cluster)) +
-  geom_histogram(show.legend = FALSE) +
-  xlim(NA, 0.0009) +
-  facet_wrap(~cluster, ncol = 2, scales = "free_y")
+# word appearance for talks 1-6
+transcript_words %>%
+  filter(talk_id<=6) %>%
+  ggplot(aes(n/transcript_total, fill=talk_id)) +
+  geom_histogram(show.legend = FALSE, bins=50) +
+  xlim(NA, 0.02) +
+  facet_wrap(~talk_id, ncol = 2, scales = "free_y")
 
 # Zipf's law states that the frequency that a word appears is inversely proportional to its rank
 freq_by_rank <- transcript_words %>% 
@@ -800,4 +803,98 @@ freq_by_rank %>%
   scale_x_log10() +
   scale_y_log10()
 
-## 3.3 The bind_tf_idf function
+# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
+# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
+transcript_words.bound <- transcript_words %>%
+  bind_tf_idf(word, talk_id, n) %>%
+  select(-transcript_total) %>%
+  arrange(desc(tf_idf))
+
+# visualise for talks 1-6
+transcript_words.bound %>%
+  filter(talk_id<=6) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(talk_id) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill = talk_id)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~talk_id, ncol = 2, scales = "free") +
+  coord_flip()
+
+##########
+# do the same by cluster, instead of talk
+#######
+
+transcript_words.cluster <- ted_transcripts %>%
+  select(-url) %>%
+  unnest_tokens(word, transcript) %>%
+  left_join(select(clusters_final, talk_id, cluster), by='talk_id') %>%
+  count(cluster, word, sort = TRUE) %>%
+  group_by(cluster) %>%
+  mutate(cluster_total = sum(n)) %>%
+  ungroup()
+
+# word appearance by clusters
+ggplot(transcript_words.cluster, aes(n/cluster_total, fill=cluster)) +
+  geom_histogram(show.legend = FALSE, bins=50) +
+  xlim(NA, 0.0005) +
+  facet_wrap(~cluster, ncol = 2, scales = "free_y")
+
+# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
+freq_by_rank <- transcript_words.cluster %>% 
+  group_by(cluster) %>% 
+  mutate(rank = row_number(), 
+         term_frequency = n/cluster_total)
+
+# Zipf's law for ted talks (by cluster)
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour=cluster)) + 
+  geom_line(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# We see that transcripts are similar to each other, and that the relationship between rank and frequency has a negative slope
+# It is not quite constant, though; perhaps we could view this as a broken power law with, say, three sections. 
+# Let's see what the exponent of the power law is for the middle section of the rank range.
+rank_subset <- freq_by_rank %>% 
+  filter(rank>=20 & rank<=5000)
+
+# fit power law line
+pl <- lm(log10(term_frequency) ~ log10(rank), data = rank_subset)
+
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
+  geom_point(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
+# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
+transcript_words.cluster.bound <- transcript_words.cluster %>%
+  bind_tf_idf(word, cluster, n) %>%
+  select(-cluster_total) %>%
+  arrange(cluster, -tf_idf) %>%
+  mutate(cluster2 = cluster[6])
+
+# visualise most important words
+transcript_words.cluster.bound %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(cluster) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill=cluster)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~cluster, ncol = 2, scales = "free") +
+  coord_flip()
+
+
+
+check <- transcript_words.cluster.bound %>%
+  #mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(cluster) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup()
