@@ -963,3 +963,627 @@ title_words.cluster.bound %>%
   labs(x = NULL, y = "tf-idf") +
   facet_wrap(~cluster, ncol = 2, scales = "free") +
   coord_flip()
+
+
+
+
+
+
+##########
+# sentiment analysis of titles!!!! ----> also find out how many neutral words, to get better percentage
+##########
+
+rownames(ted_transcripts) <- ted_transcripts$talk_id
+
+title_corpus <- VCorpus(VectorSource(ted_data$title)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+
+title_txt <- tidytext::tidy(title_corpus) %>%
+  mutate(talk_id = ted_data$talk_id) %>%
+  mutate(total_words = str_count(text, " ") + 1)
+
+# calculate occurence of positive/negative sentiment 
+get_sentiment <- function(row_n){
+  temp_txt <- ted_txt[row_n,]
+  tidy_temp_text <- temp_txt %>%
+    select(text, id) %>%
+    group_by(id) %>% 
+    unnest_tokens(word, text) %>%
+    ungroup() %>% # you can experiment with not including this when you compute count()
+    anti_join(stop_words, by='word') 
+  
+  temp_result <- tidy_temp_text %>%
+    inner_join(get_sentiments("bing"), by='word') %>%
+    count(id, sentiment, word) %>%
+    ungroup() %>%
+    group_by(sentiment) %>%
+    summarize(words = sum(n)) %>%
+    mutate(id = row_n)
+  return(temp_result)
+}
+
+title_sentiment <- get_sentiment(1)
+
+# run across all transcripts
+for (i in c(2:as.integer(count(title_txt)))){
+  data_temp <- get_sentiment(i)
+  title_sentiment <- rbind(title_sentiment, data_temp)
+}
+
+title_sentiment <- title_sentiment %>%
+  spread(sentiment, words)
+
+title_sentiment[is.na(title_sentiment)] <- 0
+
+title_data_sentiment <- title_sentiment %>%
+  left_join(mutate(ted_txt, id=as.integer(id)), by='id') %>%
+  select(talk_id, negative, positive, language, total_words) %>%
+  mutate(perc.pos = positive/total_words*100,
+         perc.neg = negative/total_words*100) %>%
+  right_join(ted_data, by='talk_id')
+
+title_data_sentiment[is.na(title_data_sentiment)] <- 0
+
+# plot sentiment and views
+title_data_sentiment %>% gather('sentiment', 'count', c(positive, negative)) %>%
+  ggplot(aes(x=count, y=log(views), colour=sentiment)) +
+  geom_jitter(size=0.8)
+
+title_data_sentiment %>% 
+  ggplot(aes(x=perc.pos, y=log(views))) +
+  geom_jitter() +
+  geom_smooth()
+
+title_data_sentiment %>% 
+  ggplot(aes(x=perc.neg, y=log(views))) +
+  geom_jitter() +
+  geom_smooth()
+
+title_data_sentiment %>% 
+  mutate(pos.binary=ifelse(perc.pos==0, 0, 1)) %>%
+  ggplot(aes(x=pos.binary, y=log(views))) +
+  geom_point() +
+  geom_smooth(method='lm')
+
+title_data_sentiment %>% 
+  mutate(neg.binary=ifelse(perc.neg==0, 0, 1)) %>%
+  ggplot(aes(x=neg.binary, y=log(views))) +
+  geom_point() +
+  geom_smooth(method='lm')
+
+title_data_sentiment %>% 
+  mutate(perc.sent=perc.pos+perc.neg,
+         sent.binary=ifelse(perc.sent==0, 0, 1)) %>%
+  ggplot(aes(x=sent.binary, y=log(views))) +
+  geom_point() +
+  geom_smooth(method='lm')
+
+title_data_sentiment %>% 
+  mutate(perc.sent=perc.pos+perc.neg) %>%
+  ggplot(aes(x=perc.sent, y=log(views))) +
+  geom_jitter() +
+  geom_smooth()
+
+title_data_sentiment %>% 
+  ggplot(aes(x=positive, y=log(comments))) +
+  geom_jitter()
+
+title_data_sentiment %>% 
+  mutate(pos_by_length = positive/title_length) %>%
+  ggplot(aes(x=pos_by_length, y=log(views))) +
+  geom_jitter() +
+  geom_smooth(method='lm')
+
+title_data_sentiment %>% 
+  mutate(neg_by_length = negative/title_length) %>%
+  ggplot(aes(x=neg_by_length, y=log(views))) +
+  geom_jitter() +
+  geom_smooth(method='lm')
+
+ted_data %>% 
+  ggplot(aes(x=description_length, y=log(views))) +
+  geom_jitter() +
+  geom_smooth(method='lm')
+
+
+# plot sentiment and ratings
+ratings_temp %>% right_join(title_data_sentiment, by='talk_id') %>%
+  ggplot(aes(x=rating, y=perc.pos)) +
+  geom_point(size=0.8) +
+  geom_smooth(method='lm') +
+  facet_wrap(~characteristic, scales = 'free')
+
+# look at sentiment by clusters (tags, hierarchical)
+title_data_sentiment %>% left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  group_by(cluster) %>%
+  mutate(cluster.pos = sum(positive),
+         cluster.neg = sum(negative),
+         mean.perc.pos = mean(perc.pos),
+         mean.perc.neg = mean(perc.neg)) %>%
+  ungroup() %>%
+  select(cluster, cluster.pos, cluster.neg, mean.perc.pos, mean.perc.neg) %>%
+  distinct() %>%
+  arrange(mean.perc.pos)
+
+clusters_final %>% group_by(cluster) %>% 
+  mutate(views.mean = mean(views),
+         views.sd = sd(views),
+         comments.mean = mean(comments),
+         comments.sd = sd(comments),
+         languages.mean = mean(languages),
+         languages.sd = sd(languages)) %>%
+  ungroup() %>%
+  select(cluster, views.mean, views.sd, comments.mean, comments.sd, languages.mean, languages.sd) %>%
+  distinct()
+
+##########
+# sentiment analysis of transcripts ----> also find out how many neutral words, to get better percentage
+##########
+
+#########
+# look at transcript data
+#########
+
+ted_transcripts <- mutate(ted_transcripts, transcript = tolower(transcript)) %>% # change all to lower case
+  left_join(select(ted_data, talk_id, url), by='url')
+rownames(ted_transcripts) = ted_transcripts$talk_id
+
+ted_corpus <- VCorpus(VectorSource(ted_transcripts$transcript)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+
+ted_txt <- tidytext::tidy(ted_corpus) %>%
+  mutate(talk_id = ted_transcripts$talk_id) %>%
+  mutate(total_words = str_count(text, " ") + 1)
+
+# calculate occurence of positive/negative sentiment 
+get_sentiment <- function(row_n){
+  temp_txt <- ted_txt[row_n,]
+  tidy_temp_text <- temp_txt %>%
+    select(text, id) %>%
+    group_by(id) %>% 
+    unnest_tokens(word, text) %>%
+    ungroup() %>% # you can experiment with not including this when you compute count()
+    anti_join(stop_words, by='word') 
+  
+  temp_result <- tidy_temp_text %>%
+    inner_join(get_sentiments("bing"), by='word') %>%
+    count(id, sentiment, word) %>%
+    ungroup() %>%
+    group_by(sentiment) %>%
+    summarize(words = sum(n)) %>%
+    mutate(id = row_n)
+  return(temp_result)
+}
+
+ted_sentiment <- get_sentiment(1)
+
+# run across all transcripts
+for (i in c(2:as.integer(count(ted_txt)))){
+  data_temp <- get_sentiment(i)
+  ted_sentiment <- rbind(ted_sentiment, data_temp)
+}
+
+ted_sentiment <- ted_sentiment %>%
+  spread(sentiment, words)
+
+ted_sentiment[is.na(ted_sentiment)] <- 0
+
+ted_data_sentiment <- ted_sentiment %>%
+  left_join(mutate(ted_txt, id=as.integer(id)), by='id') %>%
+  select(talk_id, negative, positive, language, total_words) %>%
+  mutate(perc.pos = positive/total_words*100,
+         perc.neg = negative/total_words*100) %>%
+  left_join(ted_data, by='talk_id')
+
+# plot sentiment and views
+ted_data_sentiment %>% gather('sentiment', 'count', c(positive, negative)) %>%
+  ggplot(aes(x=count, y=log(views), colour=sentiment)) +
+  geom_jitter(size=0.8)
+
+ted_data_sentiment %>% gather('sentiment', 'count', c(perc.pos, perc.neg)) %>%
+  ggplot(aes(x=count, y=log(views), colour=sentiment)) +
+  geom_jitter(size=0.8) +
+  geom_smooth(method='lm')
+
+ted_data_sentiment %>% 
+  ggplot(aes(x=perc.pos, y=log(views))) +
+  geom_point()
+
+ted_data_sentiment %>% 
+  ggplot(aes(x=perc.neg, y=log(views))) +
+  geom_point()
+
+ted_data_sentiment %>% 
+  ggplot(aes(x=positive, y=log(comments))) +
+  geom_point()
+
+# plot sentiment and ratings
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  ggplot(aes(x=rating, y=perc.pos)) +
+  geom_point(size=0.8) +
+  geom_smooth(method='lm') +
+  facet_wrap(~characteristic, scales = 'free')
+
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  ggplot(aes(x=rating, y=perc.neg)) +
+  geom_point(size=0.8) +
+  geom_smooth(method='lm') +
+  facet_wrap(~characteristic, scales = 'free')
+
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  gather(sentiment, percentage, c(perc.pos, perc.neg)) %>%
+  ggplot(aes(x=rating, y=percentage, colour = sentiment)) +
+  geom_jitter(size=0.8, colour='black') +
+  geom_smooth(method='lm') +
+  facet_wrap(~characteristic, scales = 'free')
+
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  mutate(perc.sent = perc.pos + perc.neg) %>%
+  ggplot(aes(x=rating, y=perc.sent)) +
+  geom_point(size=0.8) +
+  geom_smooth(method='lm') +
+  facet_wrap(~characteristic, scales = 'free')
+
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  mutate(perc.sent = perc.pos + perc.neg) %>%
+  ggplot(aes(y=log(views), x=perc.sent)) +
+  geom_point(size=0.8) +
+  geom_smooth()
+
+ratings_temp %>% right_join(ted_data_sentiment, by='talk_id') %>%
+  gather(sentiment, percentage, c(perc.pos, perc.neg)) %>%
+  ggplot(aes(y=log(views), x=percentage, colour=sentiment)) +
+  geom_point(size=0.8) +
+  geom_smooth(method='lm')
+
+# look at sentiment by clusters (tags, hierarchical)
+ted_data_sentiment %>% 
+  left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  mutate(perc.sent = perc.pos + perc.neg) %>%
+  group_by(cluster) %>%
+  mutate(cluster.pos = sum(positive),
+         cluster.neg = sum(negative),
+         mean.perc.pos = mean(perc.pos),
+         mean.perc.neg = mean(perc.neg),
+         mean.perc.sent = mean(perc.sent)) %>%
+  ungroup() %>%
+  select(cluster, cluster.pos, cluster.neg, mean.perc.pos, mean.perc.neg, mean.perc.sent) %>%
+  distinct() %>%
+  arrange(mean.perc.sent)
+
+ted_data_sentiment %>% 
+  left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  mutate(perc.sent = perc.pos + perc.neg) %>%
+  ggplot(aes(x=cluster, y=perc.sent)) +
+  geom_boxplot()
+
+clusters_final %>% group_by(cluster) %>% 
+  mutate(views.mean = mean(views),
+         views.sd = sd(views),
+         comments.mean = mean(comments),
+         comments.sd = sd(comments),
+         languages.mean = mean(languages),
+         languages.sd = sd(languages)) %>%
+  ungroup() %>%
+  select(cluster, views.mean, views.sd, comments.mean, comments.sd, languages.mean, languages.sd) %>%
+  distinct() %>%
+  arrange(-views.mean)
+
+clusters_final %>%
+  ggplot(aes(x=cluster, y=log(views))) +
+  geom_boxplot()
+
+clusters_final %>%
+  ggplot(aes(x=cluster, y=views)) +
+  geom_boxplot()
+
+### look at relationships
+
+# percentage ratings
+clusters_final1 <- left_join(clusters_final, ratings_percent, by='talk_id') %>% 
+  spread(cluster, cuts) %>%
+  mutate(`group 1` = ifelse(is.na(`group 1`), 0, 1),
+         `group 2` = ifelse(is.na(`group 2`), 0, 1), 
+         `group 3` = ifelse(is.na(`group 3`), 0, 1), 
+         `group 4` = ifelse(is.na(`group 4`), 0, 1), 
+         `group 5` = ifelse(is.na(`group 5`), 0, 1))
+nums <- unlist(lapply(clusters_final1, is.numeric))  
+data_temp <- clusters_final1[ , nums]
+
+cor_data <- data.frame(cor(data_temp, method = c("pearson")))
+
+
+left_join(ted_data_sentiment, select(clusters_final, talk_id, cluster), by='talk_id') %>%
+  ggplot(aes(x=cluster, y=perc.pos)) +
+  geom_boxplot()
+
+ggplot(ted_data_sentiment, aes(x=perc.pos)) +
+  geom_histogram()
+
+left_join(ted_data_sentiment, select(clusters_final, talk_id, cluster), by='talk_id') %>%
+  ggplot(aes(x=cluster, y=positive)) +
+  geom_boxplot()
+
+
+
+
+####
+## TF-IDF analysis
+# https://www.tidytextmining.com/tfidf.html
+######
+
+ted_transcripts <- data.frame(lapply(ted_transcripts, function(x) {
+  gsub("кт", " ", x)
+  gsub("к", " ", x)
+}))
+
+transcript_words <- ted_transcripts %>%
+  select(-url) %>%
+  unnest_tokens(word, transcript) %>%
+  count(talk_id, word, sort = TRUE) %>%
+  group_by(talk_id) %>%
+  mutate(transcript_total = sum(n)) %>%
+  ungroup()
+
+# word appearance for talks 1-6
+transcript_words %>%
+  filter(talk_id<=6) %>%
+  ggplot(aes(n/transcript_total, fill=talk_id)) +
+  geom_histogram(show.legend = FALSE, bins=50) +
+  xlim(NA, 0.02) +
+  facet_wrap(~talk_id, ncol = 2, scales = "free_y")
+
+# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
+freq_by_rank <- transcript_words %>% 
+  group_by(talk_id) %>% 
+  mutate(rank = row_number(), 
+         term_frequency = n/transcript_total)
+
+# Zipf's law for ted talks (by cluster)
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_point(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# Zipf's law for ted talks (by talk) --> DOES NOT RUN!! FREEZES EVERYTHING
+#freq_by_rank %>% 
+#  ggplot(aes(rank, term_frequency, colour=talk_id)) + 
+#  geom_line(size=0.8, alpha=0.5, show.legend=FALSE) + 
+#  scale_x_log10() +
+#  scale_y_log10()
+
+# We see that transcripts are similar to each other, and that the relationship between rank and frequency has a negative slope
+# It is not quite constant, though; perhaps we could view this as a broken power law with, say, three sections. 
+# Let's see what the exponent of the power law is for the middle section of the rank range.
+rank_subset <- freq_by_rank %>% 
+  filter(rank < 500)
+
+# fit power law line
+pl <- lm(log10(term_frequency) ~ log10(rank), data = rank_subset)
+
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
+  geom_point(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
+# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
+transcript_words.bound <- transcript_words %>%
+  bind_tf_idf(word, talk_id, n) %>%
+  select(-transcript_total) %>%
+  arrange(desc(tf_idf))
+
+# visualise for talks 1-6
+transcript_words.bound %>%
+  filter(talk_id<=6) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(talk_id) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill = talk_id)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~talk_id, ncol = 2, scales = "free") +
+  coord_flip()
+
+##########
+# do the same by cluster, instead of talk
+#######
+
+transcript_words.cluster <- ted_transcripts %>%
+  select(-url) %>%
+  unnest_tokens(word, transcript) %>%
+  left_join(select(clusters_final, talk_id, cluster), by='talk_id') %>%
+  count(cluster, word, sort = TRUE) %>%
+  group_by(cluster) %>%
+  mutate(cluster_total = sum(n)) %>%
+  ungroup()
+
+# word appearance by clusters
+ggplot(transcript_words.cluster, aes(n/cluster_total, fill=cluster)) +
+  geom_histogram(show.legend = FALSE, bins=50) +
+  xlim(NA, 0.0005) +
+  facet_wrap(~cluster, ncol = 2, scales = "free_y")
+
+# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
+freq_by_rank <- transcript_words.cluster %>% 
+  group_by(cluster) %>% 
+  mutate(rank = row_number(), 
+         term_frequency = n/cluster_total)
+
+# Zipf's law for ted talks (by cluster)
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour=cluster)) + 
+  geom_line(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# We see that transcripts are similar to each other, and that the relationship between rank and frequency has a negative slope
+# It is not quite constant, though; perhaps we could view this as a broken power law with, say, three sections. 
+# Let's see what the exponent of the power law is for the middle section of the rank range.
+rank_subset <- freq_by_rank %>% 
+  filter(rank>=20 & rank<=5000)
+
+# fit power law line
+pl <- lm(log10(term_frequency) ~ log10(rank), data = rank_subset)
+
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
+  geom_point(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
+# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
+transcript_words.cluster.bound <- transcript_words.cluster %>%
+  bind_tf_idf(word, cluster, n) %>%
+  select(-cluster_total) %>%
+  arrange(cluster, -tf_idf) %>%
+  mutate(cluster2 = cluster[6])
+
+# visualise most important words
+transcript_words.cluster.bound %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(cluster) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill=cluster)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~cluster, ncol = 2, scales = "free") +
+  coord_flip()
+
+
+
+check <- transcript_words.cluster.bound %>%
+  #mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(cluster) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup()
+
+########
+###### do the same for DESCRIPTIONS
+######
+
+# by cluster
+# most important words in descriptions
+
+description_words.cluster <- ted_data %>%
+  select(description, talk_id) %>%
+  left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  unnest_tokens(word, description) %>%
+  count(cluster, word, sort = TRUE) %>%
+  group_by(cluster) %>%
+  mutate(cluster_total = sum(n)) %>%
+  ungroup()
+
+# word appearance by clusters
+ggplot(description_words.cluster, aes(n/cluster_total, fill=cluster)) +
+  geom_histogram(show.legend = FALSE, bins=50) +
+  xlim(NA, 0.0025) +
+  facet_wrap(~cluster, ncol=2, scales="free")
+
+# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
+freq_by_rank <- description_words.cluster %>% 
+  group_by(cluster) %>% 
+  mutate(rank = row_number(), 
+         term_frequency = n/cluster_total)
+
+# Zipf's law for ted talks (by cluster)
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour=cluster)) + 
+  geom_line(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# fit power law line
+pl <- lm(log10(term_frequency) ~ log10(rank), data=freq_by_rank)
+
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
+  geom_line(size=0.8)+ 
+  scale_x_log10() +
+  scale_y_log10()
+
+# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
+# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
+description_words.cluster.bound <- description_words.cluster %>%
+  bind_tf_idf(word, cluster, n) %>%
+  select(-cluster_total) %>%
+  arrange(cluster, -tf_idf) %>%
+  mutate(cluster2 = cluster[6])
+
+# visualise most important words
+description_words.cluster.bound %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(cluster) %>% 
+  top_n(12, tf_idf) %>% 
+  arrange(desc(tf_idf)) %>%
+  ungroup() %>%
+  ggplot(aes(x=reorder(word, tf_idf), y=tf_idf, fill=cluster)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~cluster, ncol = 2, scales = "free") +
+  coord_flip()
+
+
+
+########### 
+###### LOOK AT RELATED TALKS
+##############
+
+
+ted_data[1,]$related_talks
+
+# analyse ratings
+ted_related_talks <- ted_data %>%
+  select(talk_id, related_talks) %>%
+  mutate(ratings2 = toString(related_talks),
+         ratings2 = str_remove_all(ratings2, '\\[|\\]|\\{'),
+         ratings2 = strsplit(ratings2, split='}', fixed=TRUE))
+
+# function to clean up ratings
+ted_talkid <- ted_data$talk_id
+clean_ratings <- function(n){
+  
+  ted_ratings <- data.frame(ratings = ted_data$ratings[n]) %>%
+    mutate(ratings2 = toString(ratings),
+           ratings2 = str_remove_all(ratings2, '\\]|\\{|\\,|\\ '),
+           ratings2 = strsplit(ratings2, split='}', fixed=TRUE))
+  
+  data <- data.frame(var1 = ted_ratings$ratings2[1]) %>%
+    separate(1, into = c('empty', 'id', 'name', 'count'), sep=':', remove=TRUE) %>%
+    select(-empty) %>%
+    mutate(id = str_remove(id, ", 'name'"),
+           name = str_remove(name, "''count'"),
+           name = str_remove(name, "'"),
+           count = as.integer(count)) %>%
+    group_by(id) %>%
+    mutate(total_count = sum(count)) %>%
+    ungroup() %>%
+    select(name, total_count) %>%
+    distinct()
+  row.names(data) <- data$name
+  data <- data %>%
+    select(total_count) %>%
+    t()
+  data <- as.data.frame(data) %>%
+    mutate(talk_id = ted_talkid[n])
+  return(data)
+}
+
+# clean ratings and make ratings df
+ratings_data <- clean_ratings(1)
+
+for (i in 2:as.integer(count(ted_data))) {
+  temp_data <- clean_ratings(i)
+  ratings_data <- rbind(ratings_data, temp_data)}
