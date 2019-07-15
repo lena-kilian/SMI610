@@ -967,7 +967,7 @@ transcript_words.bound %>%
 transcript_clusters <- transcript_words.bound %>%
   mutate(word = factor(word, levels = rev(unique(word)))) %>% 
   group_by(talk_id) %>% 
-  top_n(100, tf_idf) %>% 
+  top_n(500, tf_idf) %>% 
   select(talk_id, word) %>%
   ungroup() %>%
   ddply(.(talk_id), summarise, top_words=list(paste(word)))
@@ -1007,7 +1007,6 @@ p5 <- wordfreq_by_cluster(5, 15)
 p6 <- wordfreq_by_cluster(6, 15)
 
 grid.arrange(p1, p2, p3, p4, p5, p6, ncol=3, nrow=2)
-
 
 # visualise most important words by cluster
 transcript_words.bound %>%
