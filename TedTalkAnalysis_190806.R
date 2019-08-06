@@ -82,12 +82,6 @@ ggplot(data_temp, aes(x=value, y=log(views))) +
   facet_wrap(~variable, scales='free')
 
 # analyse ratings
-ted_ratings <- ted_data %>%
-  select(talk_id, ratings) %>%
-  mutate(ratings2 = toString(ratings),
-         ratings2 = str_remove_all(ratings2, '\\[|\\]|\\{'),
-         ratings2 = strsplit(ratings2, split='}', fixed=TRUE))
-
 # function to clean up ratings
 ted_talkid <- ted_data$talk_id
 clean_ratings <- function(n){
@@ -888,148 +882,6 @@ left_join(ted_data_sentiment, select(clusters_final, talk_id, cluster), by='talk
 ## TF-IDF analysis
 # https://www.tidytextmining.com/tfidf.html
 ######
-
-transcript_words <- ted_transcripts %>%
-  select(-url) %>%
-  unnest_tokens(word, transcript) %>%
-  count(talk_id, word, sort = TRUE) %>%
-  group_by(talk_id) %>%
-  mutate(transcript_total = sum(n)) %>%
-  ungroup()
-
-# word appearance for talks 1-6
-transcript_words %>%
-  filter(talk_id<=6) %>%
-  ggplot(aes(n/transcript_total, fill=talk_id)) +
-  geom_histogram(show.legend = FALSE, bins=50) +
-  xlim(NA, 0.02) +
-  facet_wrap(~talk_id, ncol = 2, scales = "free_y")
-
-# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
-freq_by_rank <- transcript_words %>% 
-  group_by(talk_id) %>% 
-  mutate(rank = row_number(), 
-         term_frequency = n/transcript_total)
-
-# Zipf's law for ted talks (by cluster)
-freq_by_rank %>% 
-  ggplot(aes(rank, term_frequency, colour = cluster)) + 
-  geom_point(size=0.8)+ 
-  scale_x_log10() +
-  scale_y_log10()
-
-# Zipf's law for ted talks (by talk) --> DOES NOT RUN!! FREEZES EVERYTHING
-#freq_by_rank %>% 
-#  ggplot(aes(rank, term_frequency, colour=talk_id)) + 
-#  geom_line(size=0.8, alpha=0.5, show.legend=FALSE) + 
-#  scale_x_log10() +
-#  scale_y_log10()
-
-# We see that transcripts are similar to each other, and that the relationship between rank and frequency has a negative slope
-# It is not quite constant, though; perhaps we could view this as a broken power law with, say, three sections. 
-# Let's see what the exponent of the power law is for the middle section of the rank range.
-rank_subset <- freq_by_rank %>% 
-  filter(rank < 500)
-
-# fit power law line
-pl <- lm(log10(term_frequency) ~ log10(rank), data = rank_subset)
-
-freq_by_rank %>% 
-  ggplot(aes(rank, term_frequency, colour = cluster)) + 
-  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
-  geom_point(size=0.8)+ 
-  scale_x_log10() +
-  scale_y_log10()
-
-# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
-# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
-transcript_words.bound <- transcript_words %>%
-  bind_tf_idf(word, talk_id, n) %>%
-  select(-transcript_total) %>%
-  arrange(desc(tf_idf))
-
-# visualise for talks 1-6
-transcript_words.bound %>%
-  filter(talk_id<=6) %>%
-  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
-  group_by(talk_id) %>% 
-  top_n(15, tf_idf) %>% 
-  ungroup() %>%
-  ggplot(aes(word, tf_idf, fill = talk_id)) +
-  geom_col(show.legend = FALSE) +
-  labs(x = NULL, y = "tf-idf") +
-  facet_wrap(~talk_id, ncol = 2, scales = "free") +
-  coord_flip()
-
-##########
-# do the same by cluster, instead of talk
-#######
-set.seed(1234)
-transcript_words.cluster <- ted_transcripts %>%
-  select(-url) %>%
-  unnest_tokens(word, transcript) %>%
-  left_join(select(clusters_final.all, talk_id, cluster), by='talk_id') %>%
-  count(cluster, word, sort = TRUE) %>%
-  group_by(cluster) %>%
-  mutate(cluster_total = sum(n)) %>%
-  ungroup() %>%
-  filter(word != "кт" & word != "к")
-
-# word appearance by clusters
-ggplot(transcript_words.cluster, aes(n/cluster_total, fill=cluster)) +
-  geom_histogram(show.legend = FALSE, bins=50) +
-  xlim(NA, 0.0005) +
-  facet_wrap(~cluster, ncol = 2, scales = "free_y")
-
-# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
-freq_by_rank <- transcript_words.cluster %>% 
-  group_by(cluster) %>% 
-  mutate(rank = row_number(), 
-         term_frequency = n/cluster_total)
-
-# Zipf's law for ted talks (by cluster)
-freq_by_rank %>% 
-  ggplot(aes(rank, term_frequency, colour=cluster)) + 
-  geom_line(size=0.8)+ 
-  scale_x_log10() +
-  scale_y_log10()
-
-# We see that transcripts are similar to each other, and that the relationship between rank and frequency has a negative slope
-# It is not quite constant, though; perhaps we could view this as a broken power law with, say, three sections. 
-# Let's see what the exponent of the power law is for the middle section of the rank range.
-rank_subset <- freq_by_rank %>% 
-  filter(rank>=10 & rank<=8000)
-
-# fit power law line
-pl <- lm(log10(term_frequency) ~ log10(rank), data = rank_subset)
-
-freq_by_rank %>% 
-  ggplot(aes(rank, term_frequency, colour = cluster)) + 
-  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
-  geom_line(size=0.8)+ 
-  scale_x_log10() +
-  scale_y_log10()
-
-# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
-# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
-transcript_words.cluster.bound <- transcript_words.cluster %>%
-  bind_tf_idf(word, cluster, n) %>%
-  select(-cluster_total) %>%
-  arrange(cluster, -tf_idf)
-
-# visualise most important words
-transcript_words.cluster.bound %>%
-  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
-  group_by(cluster) %>% 
-  top_n(12, tf_idf) %>% 
-  ungroup() %>%
-  ggplot(aes(reorder(word, tf_idf), tf_idf, fill=cluster)) +
-  geom_col(show.legend = FALSE) +
-  labs(x = NULL, y = "tf-idf") +
-  facet_wrap(~cluster, ncol = 2, scales = "free") +
-  coord_flip()
-
-
 ########
 ###### do the same for DESCRIPTIONS
 ######
@@ -1161,8 +1013,12 @@ description_words.cluster.bound %>%
   coord_flip()
 
 
-### random forest
+####
+## Random Forest
+######
+###
 
-rf_data <- clusters_final.all
+rf_data <- clusters_final.all %>%
+  left_join(ratings_percent, by='talk_id')
 
 
