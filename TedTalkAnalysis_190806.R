@@ -129,12 +129,6 @@ ratings_percent <- (temp / rowSums(temp) * 100) %>%
   mutate(talk_id = ted_talkid)
 
 # visualising relationships 
-names(ratings_data)
-
-temp_data <- left_join(ted_data, ratings_percent, by='talk_id')
-ggplot(temp_data, aes(x=Funny, y=views))+
-  geom_point()
-
 # look at percentage because more views are likely linked to more comments
 ratings_temp <- gather(ratings_percent, 'characteristic', 'rating', c('Funny':'Inspiring'))
 ratings_temp %>% right_join(select(ted_data, talk_id, views), by='talk_id') %>%
@@ -195,7 +189,8 @@ summary(pca1) # shows variance explained by components
 
 pca1$scores # shows scores on different components
 
-pca_data <- data.frame(pca1$scores)[,c(1,2,3)] %>% # here using the first 3 components to explain 80% of variance
+pca_data <- data.frame(pca1$scores)[,c(1,2)] %>% # here using the first 2 components to explain 64% of variance
+                                                 # if using first 3 components then 80% of variance is explained
   mutate(characteristic = row.names(pca1$loadings))
 
 plot_ly(pca_data, x =~Comp.1, y =~Comp.2, z =~Comp.3, mode='text', text=~characteristic) %>%
@@ -204,7 +199,7 @@ plot_ly(pca_data, x =~Comp.1, y =~Comp.2, z =~Comp.3, mode='text', text=~charact
                       yaxis = list(title = 'Component 2'),
                       zaxis = list(title = 'Component 3')))
 
-
+set.seed(1)
 kmns_pca <- kmeans(select(pca_data, -characteristic), 4) # divide data (first 2 pca comps) into 3 clusters
 
 # plot pca vs non-pca cluster results
@@ -237,6 +232,7 @@ rating_cluster %>%
   group_by(talk_id) %>%
   top_n(1, rating) %>%
   left_join(ted_data, by='talk_id') %>%
+  #ggplot(aes(x=(cluster_pca=='Cluster_ 2'), y=log(views))) +
   ggplot(aes(x=cluster_pca, y=log(views))) +
   geom_boxplot()
 
@@ -244,7 +240,7 @@ rating_cluster %>%
   group_by(talk_id) %>%
   top_n(1, rating) %>%
   left_join(ted_data, by='talk_id') %>%
-  ggplot(aes(x=characteristic, y=log(views))) +
+  ggplot(aes(x=reorder(characteristic, log(views)), y=log(views), fill=cluster_pca)) +
   geom_boxplot() + 
   theme(axis.text.x=element_text(angle=45, hjust=1))
 
@@ -339,6 +335,13 @@ clusters %>%
   ggplot(aes(x=views, y=reorder(cluster, views))) +
   geom_density_ridges_gradient() +
   scale_fill_continuous()
+
+clusters %>% 
+  left_join(cluster_ratings, by='talk_id') %>%
+  ggplot(aes(x=percent, y=cluster)) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous() +
+  facet_wrap(~cluster_pca, scales='free')
 
 clusters %>% 
   left_join(cluster_ratings, by='talk_id') %>%
@@ -877,7 +880,6 @@ left_join(ted_data_sentiment, select(clusters_final, talk_id, cluster), by='talk
 
 
 
-
 ####
 ## TF-IDF analysis
 # https://www.tidytextmining.com/tfidf.html
@@ -949,6 +951,32 @@ description_words.cluster.bound %>%
   coord_flip()
 
 
+wordfreq_by_cluster <- function(n_cluster, top_words) {
+  temp_plot <- description_words.cluster.bound %>%
+    filter(cluster == n_cluster) %>%
+    mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+    group_by(cluster) %>% 
+    top_n(top_words, tf_idf) %>% 
+    arrange(desc(tf_idf)) %>%
+    ungroup() %>%
+    ggplot(aes(x=reorder(word, tf_idf), y=tf_idf, fill=cluster)) +
+    geom_col(show.legend = FALSE) +
+    labs(x = NULL, y = "tf-idf") +
+    coord_flip()
+  return(temp_plot)
+}
+
+p1 <- wordfreq_by_cluster('group 1', 12)
+p2 <- wordfreq_by_cluster('group 2', 12)
+p3 <- wordfreq_by_cluster('group 3', 12)
+p4 <- wordfreq_by_cluster('group 4', 12)
+p5 <- wordfreq_by_cluster('group 5', 12)
+p6 <- wordfreq_by_cluster('group 6', 12)
+p7 <- wordfreq_by_cluster('group 7', 12)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow=3, ncol=2)
+#~~~~~
+
 ##### 7
 # most important words in descriptions
 
@@ -1012,6 +1040,15 @@ description_words.cluster.bound %>%
   facet_wrap(~cluster, ncol = 2, scales = "free") +
   coord_flip()
 
+p1 <- wordfreq_by_cluster('group 1', 12)
+p2 <- wordfreq_by_cluster('group 2', 12)
+p3 <- wordfreq_by_cluster('group 3', 12)
+p4 <- wordfreq_by_cluster('group 4', 12)
+p5 <- wordfreq_by_cluster('group 5', 12)
+p6 <- wordfreq_by_cluster('group 6', 12)
+p7 <- wordfreq_by_cluster('group 7', 12)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, nrow=4, ncol=2)
 
 ####
 ## Random Forest
@@ -1020,5 +1057,8 @@ description_words.cluster.bound %>%
 
 rf_data <- clusters_final.all %>%
   left_join(ratings_percent, by='talk_id')
+
+#write_csv(rf_data, 'rf_data.csv')
+
 
 
