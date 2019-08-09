@@ -1,6 +1,7 @@
 *
 
 !*.R
+!*.Rmd
 !*.ipynb
 !*.py
 !.gitignore
