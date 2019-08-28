@@ -1,0 +1,812 @@
+---
+title: 'Appendix A: Code'
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(rjson)
+library(ggridges)
+library(tm)
+library(proxy)
+library(fpc)
+library(cluster)
+library(tidytext)
+library(GGally)
+library(reshape2)
+library(viridis)
+library(ggfortify)
+library(gridExtra)
+library(ggrepel)
+library(pander)
+library(grid)
+library(tree)
+library(randomForest)
+```
+
+## load and clean data
+
+```{r, warning=FALSE, message=FALSE}
+# load ted data
+ted_data <- read.csv('Data/ted_main.csv', sep=',', header=TRUE, stringsAsFactors = FALSE)
+
+# explore ted_data variables
+names(ted_data)
+
+# clean ted_data
+ted_data <- ted_data %>%
+  mutate(tags = tolower(tags), # lower case string variables for later analysis
+         title = tolower(title),
+         film_date = as_datetime(film_date),
+         published_date = as_datetime(published_date), # convert dates from UNIX to datetime format
+         published_year = as.character(substring(published_date, 1, 4)),
+         filmed_year = as.character(substring(film_date, 1, 4)),
+         talk_id = c(1:as.integer(count(ted_data))), # add ID to each talk
+         title_length = nchar(title), # add string length of title
+         description_length = nchar(description), # add string length of talk description
+         comments_per_view = comments/views) # add comments per view
+
+# load and clean transcript data
+ted_transcripts <- read.csv('Data/transcripts.csv', sep=',', header=TRUE, stringsAsFactors = FALSE) %>%
+  mutate(transcript = tolower(transcript)) %>% # change all to lower case
+  left_join(select(ted_data, talk_id, url), by='url') # add same ID to each talk as in ted_data
+```
+
+lengths not the same --> ted_data length = 2550, ted_transcript length = 2464
+
+
+
+## explore variables
+
+
+```{r, warning=FALSE, message=FALSE}
+p1 <- ggplot(ted_data, aes(x=log(views))) +
+  geom_histogram() +
+  theme_bw()
+p2 <- ggplot(ted_data, aes(x=log(comments_per_view))) +
+  geom_histogram()+
+  theme_bw()
+p3 <- ggplot(ted_data, aes(x=log(comments))) +
+  geom_histogram()+
+  theme_bw()
+p4 <- ggplot(ted_data, aes(x=film_date)) + # by film date
+  geom_histogram(bins=50)+
+  theme_bw()
+p5 <- ggplot(ted_data, aes(x=published_date)) + # by film date
+  geom_histogram(bins=60)+
+  theme_bw()
+p6 <- ggplot(ted_data, aes(x=languages)) + # by film date
+  geom_histogram(bins=50)+
+  theme_bw()
+
+# look at distributions
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow=3, ncol=2)
+
+# explore relationships between numerical variables and views
+nums <- unlist(lapply(ted_data, is.numeric)) #extract all numerical variables
+data_temp <- ted_data[ , nums] %>%
+  select(-talk_id) %>% # remove talk_id
+  mutate(comments_per_view.log = log(comments_per_view), # add log of comments per view and duration
+         duration.log = log(duration)) %>%
+  gather('variable', 'value', c(1, 2, 3, 4, 6, 7, 8, 9, 10))
+
+ggplot(data_temp, aes(x=value, y=log(views))) +
+  geom_jitter(size=0.5) +
+  geom_smooth(method='lm', colour='orange') +
+  facet_wrap(~variable, scales='free')  +
+  labs(title = 'Relationship between views and other continuous variables') +
+  theme_bw()
+```
+##explore ratings
+
+```{r, warning=FALSE, message=FALSE}
+# analyse ratings
+# function to clean up ratings
+clean_ratings <- function(n){
+  
+  ted_ratings <- data.frame(ratings = ted_data$ratings[n]) %>%
+    mutate(ratings2 = toString(ratings),
+           ratings2 = str_remove_all(ratings2, '\\]|\\{|\\,|\\ '),
+           ratings2 = strsplit(ratings2, split='}', fixed=TRUE))
+  
+  data <- data.frame(var1 = ted_ratings$ratings2[1]) %>%
+    separate(1, into = c('empty', 'id', 'name', 'count'), sep=':', remove=TRUE) %>%
+    select(-empty) %>%
+    mutate(id = str_remove(id, ", 'name'"),
+           name = str_remove(name, "''count'"),
+           name = str_remove(name, "'"),
+           count = as.integer(count)) %>%
+    group_by(id) %>%
+    mutate(total_count = sum(count)) %>%
+    ungroup() %>%
+    select(name, total_count) %>%
+    distinct()
+  row.names(data) <- data$name
+  data <- data %>%
+    select(total_count) %>%
+    t()
+  data <- as.data.frame(data) %>%
+    mutate(talk_id = ted_data$talk_id[n])
+  return(data)
+}
+
+# clean ratings and make ratings df
+ratings_data <- clean_ratings(1)
+
+for (i in 2:as.integer(count(ted_data))) {
+  temp_data <- clean_ratings(i)
+  ratings_data <- rbind(ratings_data, temp_data)}
+
+ratings_data <- ratings_data %>%
+  mutate(total = Funny + Beautiful + Ingenious + Courageous + Longwinded + Confusing + Informative + Fascinating +
+           Unconvincing + Persuasive + `Jaw-dropping` + OK + Obnoxious + Inspiring)
+
+
+# convert to percentage
+temp <- select(ratings_data, -talk_id, -total)
+ratings_percent <- (temp / rowSums(temp) * 100) %>%
+  mutate(talk_id = ted_data$talk_id)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# visualising relationships 
+# look at percentage because more views are likely linked to more comments
+ratings_temp <- gather(ratings_percent, 'characteristic', 'rating', c('Funny':'Inspiring'))
+
+# distributions of percentage ratings
+ratings_temp %>% right_join(select(ted_data, talk_id, views), by='talk_id') %>%
+  ggplot(aes(x=rating, y=reorder(characteristic, rating))) +
+  geom_density_ridges_gradient() +
+  labs(title = 'Distributions of Different Ratings',
+       x = 'Rating Frequency in Percent',
+       y = '') +
+  theme_bw()
+
+ratings_temp %>% right_join(select(ted_data, talk_id, views), by='talk_id') %>%
+  filter(rating != 0) %>%
+  ggplot(aes(x=log(rating), y=log(views))) +
+  geom_point(size=0.3) +
+  geom_smooth(method='lm', colour='orange') +
+  facet_wrap(~characteristic, scales = 'free') +
+  labs(title = 'Relationship between Views and Ratings by Characteristic',
+       x = 'Rating Frequency in Percent (ln)',
+       y = 'Views (ln)') +
+  theme_bw()
+```
+cluster by ratings
+
+```{r, warning=FALSE, message=FALSE}
+# PCA assumes that variables are uncorrelated
+cor_matrix.ratings <- cor(select(ratings_percent, -talk_id), method = c("pearson"))
+
+ggplot(data = melt(cor_matrix.ratings), aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() + 
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_viridis(guide=FALSE) +
+  geom_text(aes(label=round(value, 2)), colour='white', size=2.5) +
+  labs(x='', y='',
+       title = 'Correlation Matrix of Rating Characteristics')
+# --> mostly not correlated, but some at +/-0.5 (Beautiful & Informative, and Fascinating & Courageous)
+
+pca1 <- princomp(data.frame(cor_matrix.ratings))
+
+summary(pca1) # shows variance explained by components 
+
+pca_data <- data.frame(pca1$scores)[,c(1,2)] %>% # here using the first 2 components to explain 64% of variance
+                                                 # if using first 3 components then 80% of variance is explained
+  mutate(characteristic = row.names(pca1$loadings))
+
+set.seed(1) # set random seed to ensure replicability of results
+kmns_pca <- kmeans(select(pca_data, -characteristic), 4) # divide data (first 2 pca comps) into 3 clusters
+
+# plot pca vs non-pca cluster results
+kmns <- kmeans(data.frame(cor_matrix.ratings), 4)
+
+cluster_data <- pca_data %>%
+  mutate(cluster_pca = paste('Cluster', kmns_pca$cluster, sep='_'),
+         cluster = paste('Cluster_', kmns$cluster),
+         characteristic = pca_data$characteristic)
+  
+
+p1 <- ggplot(cluster_data, aes(x=Comp.1, y=Comp.2, colour=cluster_pca, label=characteristic)) +
+  geom_point()+
+  geom_label_repel(size=2.5) +
+  labs(title = 'PCA K-means',
+       colour = 'Characteristic group') +
+  scale_colour_manual(labels=c('1', '2', '3', '4'), 
+                      values=c("#D55E00", "#0072B2", "#009E73", "#CC79A7")) +
+  theme_bw()
+
+p2 <- ggplot(cluster_data, aes(x=Comp.1, y=Comp.2, colour=cluster, label=characteristic)) +
+  geom_point() +
+  geom_label_repel(size=2.5) +
+  labs(title = 'Raw K-means',
+       colour = 'Characteristic group') +
+  scale_colour_manual(labels=c('1', '2', '3', '4'), 
+                      values=c("#D55E00", "#0072B2", "#009E73", "#CC79A7")) +
+  theme_bw()
+
+grid.arrange(p1, p2, nrow=2)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+rating_cluster <- ratings_temp %>%
+  #gsub(characteristic, "-", ".") %>%
+  mutate(characteristic = ifelse(characteristic == 'Jaw-dropping', 'Jaw.dropping', characteristic)) %>%
+  left_join(select(cluster_data, characteristic, cluster_pca), by='characteristic') 
+
+cluster_lookup <- rating_cluster %>%
+  select(cluster_pca, characteristic) %>%
+  distinct()
+
+rating_cluster %>%
+  group_by(talk_id) %>%
+  top_n(1, rating) %>%
+  left_join(ted_data, by='talk_id') %>%
+  ggplot(aes(x=reorder(characteristic, log(views)), y=log(views), fill=cluster_pca)) +
+  geom_boxplot() + 
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_manual(labels=c('1', '2', '3', '4'), 
+                      values=c("#D55E00", "#0072B2", "#009E73", "#CC79A7")) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  labs(title='Views by Most Common Rating',
+       x='',
+       y='Views (ln)',
+       fill='Characteristic group')
+
+
+# ratings and views
+cluster_ratings <- select(ratings_data, -total) %>%
+  gather(characteristic, rating, c(1:14)) %>%
+  mutate(characteristic = ifelse(characteristic == 'Jaw-dropping', 'Jaw.dropping', characteristic)) %>%
+  left_join(distinct(select(rating_cluster, cluster_pca, characteristic)), by='characteristic') %>%
+  group_by(talk_id, cluster_pca) %>%
+  mutate(total = sum(rating)) %>%
+  select(-characteristic, -rating) %>%
+  distinct() %>%
+  group_by(talk_id) %>%
+  mutate(percent = total/sum(total) *100) %>%
+  ungroup() %>%
+  select(talk_id, cluster_pca, percent)
+
+cluster_ratings %>%
+  mutate(cluster_pca = str_replace(cluster_pca, "Cluster_", "")) %>%
+  left_join(ted_data, by='talk_id') %>%
+  ggplot(aes(x=percent, y=log(views))) +
+  geom_point(size=0.5, aes(colour=cluster_pca)) +
+  scale_colour_manual(labels=c('1', '2', '3', '4'), 
+                      values=c("#D55E00", "#0072B2", "#009E73", "#CC79A7"), 
+                      guide=FALSE) +
+  geom_smooth(method='lm', colour='black') +
+  facet_wrap(~cluster_pca) + 
+  labs(title = 'Views and Ratings by Characteristic Group',
+       y = 'Views (ln)',
+       x = 'Rating Frequency in Percent') +
+  theme_bw()
+
+```
+
+#######
+### text analysis
+######
+
+```{r, message=FALSE, warning=FALSE}
+# function for plot
+wordfreq_by_cluster <- function(n_cluster, top_words) {
+  data_temp <- filter(clusters, cuts == n_cluster)
+  temp_corpus <- Corpus(VectorSource(data_temp$tags)) %>% # convert to corpus
+    tm_map(removeWords, stopwords("english")) %>% # clean up
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace) %>%
+    tm_map(removeWords, c('tedx', 'fellow', 'ted'))
+  
+  temp_dtm <- DocumentTermMatrix(temp_corpus)
+  temp_freq <- colSums(as.matrix(temp_dtm))
+  
+  temp_freq_df <- data.frame(word=names(temp_freq), freq=temp_freq) %>%
+    arrange(freq) %>%
+    top_n(top_words)
+
+  ggplot(subset(temp_freq_df), aes(x = reorder(word, -freq), y = freq)) +
+    geom_bar(stat = "identity") + 
+    labs(x = '',
+         y = '',
+         title = paste('Cluster', n_cluster, sep=' '),
+         size=5) +
+    theme(axis.text.x=element_text(angle=45, hjust=1)) +
+    theme_bw()
+}
+
+# prepare data
+tag_corpus <- Corpus(VectorSource(ted_data$tags)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(removeWords, c('tedx', 'fellow', 'ted'))
+
+tag_dtm <- DocumentTermMatrix(tag_corpus)
+
+# look at most frequent terms
+tag_freq <- colSums(as.matrix(tag_dtm))
+
+tag_freq_df <- data.frame(word=names(tag_freq), freq=tag_freq)
+
+ggplot(subset(tag_freq_df, freq>110), aes(x = reorder(word, -freq), y = freq)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  labs(title = 'Most Common Tags',
+       y = 'Frequency',
+       x = '')
+
+# cluster by keywords
+# hierarchical clustering on tags
+sparse_tag_dtm <- removeSparseTerms(tag_dtm, sparse=0.95)
+mat <- as.matrix(sparse_tag_dtm)
+docsdissim <- dist(scale(mat))
+
+h <- hclust(docsdissim, method = "ward.D")
+
+cuts <- cutree(h, 6)
+clusters <- data.frame(cuts) %>%
+  mutate(talk_id = ted_data$talk_id) %>%
+  left_join(ted_data, by='talk_id') %>%
+  mutate(cluster = paste('group', as.character(cuts)),
+         views = as.double(views))
+
+clusters_final <- clusters
+
+# get summary
+cluster_summary_h <- clusters %>% 
+  group_by(cluster) %>% 
+  mutate(mean = mean(views), std = sd(views), count = n()) %>%
+  ungroup() %>% 
+  select(cluster, mean, std, count) %>%
+  distinct()
+
+# plot word counts by cluster
+p1 <- wordfreq_by_cluster(1, 10)
+p2 <- wordfreq_by_cluster(2, 10)
+p3 <- wordfreq_by_cluster(3, 10)
+p4 <- wordfreq_by_cluster(4, 10)
+p5 <- wordfreq_by_cluster(5, 10)
+p6 <- wordfreq_by_cluster(6, 10)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, ncol=3, nrow=2,
+             left="Frequency", top="Top 10 Words by Cluster")
+```
+
+split clsuter 1
+```{r, message=FALSE, warning=FALSE}
+##### split up cluster one further:
+temp_data <- clusters_final %>%
+  filter(cuts==1) %>%
+  select(-cuts, -cluster)
+
+tag_corpus.cluster1 <- Corpus(VectorSource(temp_data$tags)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up: remove stopwords, punctionation, extra white space, and specific common, meaningless terms 
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(removeWords, c('tedx', 'fellow', 'ted'))
+
+tag_dtm.cluster1 <- DocumentTermMatrix(tag_corpus.cluster1)
+
+# cluster by keywords
+# hierarchical clustering on tags
+sparse_tag_dtm.cluster1 <- removeSparseTerms(tag_dtm.cluster1, sparse=0.95)
+mat.cluster1 <- as.matrix(sparse_tag_dtm.cluster1)
+docsdissim.cluster1 <- dist(scale(mat.cluster1))
+
+h.cluster1 <- hclust(docsdissim.cluster1, method = "ward.D")
+
+cuts.cluster1 <- cutree(h.cluster1, 2)
+group_no_other <- max(clusters_final$cuts)-1
+
+clusters.cluster1 <- data.frame(cuts.cluster1) %>%
+  mutate(talk_id = temp_data$talk_id) %>%
+  left_join(temp_data, by='talk_id') %>%
+  mutate(cuts.split1 = ifelse(cuts.cluster1==1, 1, cuts.cluster1+group_no_other),
+         views = as.double(views))
+
+clusters_final.cluster1 <- clusters.cluster1 %>%
+  select(talk_id, cuts.split1)
+
+clusters_final.all <- clusters_final %>%
+  left_join(clusters_final.cluster1, by='talk_id') %>%
+  mutate(cuts.split1 = ifelse(is.na(cuts.split1), cuts, cuts.split1),
+         cluster.split1 = ifelse(cluster=='group 1', paste('group', as.character(cuts.split1)), cluster))
+
+# get summary
+cluster_summary_h.split1 <- clusters_final.all %>% 
+  group_by(cluster.split1) %>% 
+  mutate(mean = mean(views), std = sd(views), count = n()) %>%
+  ungroup() %>% 
+  select(cluster.split1, mean, std, count) %>%
+  distinct()
+
+clusters <- mutate(clusters_final.all, cuts = cuts.split1)
+
+# plot word counts by cluster
+p1 <- wordfreq_by_cluster(1, 15)
+p7 <- wordfreq_by_cluster(7, 15)
+
+grid.arrange(p1, p7, ncol=2, nrow=1,
+             left="Frequency", top="Top 15 Words by Cluster - Cluster 1 Split")
+```
+
+```{r, warning=FALSE, message=FALSE}
+clusters_final.all %>% 
+  left_join(cluster_ratings, by='talk_id') %>%
+  mutate(cluster_pca = str_replace(cluster_pca, "Cluster_", "Characteristic group ")) %>%
+  ggplot(aes(x=percent, y=cluster.split1)) +
+  geom_density_ridges_gradient() +
+  scale_fill_continuous() +
+  facet_wrap(~cluster_pca, scales='free') +
+  theme_bw() +
+  labs(title='Ratings by Tag Cluster',
+       x='Rating Frequency in Percent',
+       y='Tag cluster')
+
+#clusters_final.all %>% 
+#  left_join(cluster_ratings, by='talk_id') %>%
+#  ggplot(aes(y=percent, fill=cluster.split1, x=cluster_pca)) +
+#  geom_boxplot() + 
+#  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+#  coord_flip() +
+#  theme_bw() +
+#  scale_x_discrete(labels=c('Cluster_1' = '1', 
+#                            'Cluster_2' = '2', 
+#                            'Cluster_3' = '3', 
+#                            'Cluster_4' = '4')) +
+#  scale_fill_manual(labels=c('1', '2', '3', '4', '5', '6', '7'), 
+#                      values=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+#                               "#D55E00", "#CC79A7")) +
+#  labs(title = 'Ratings by Tag Cluster',
+#       y='Rating Frequency in Percent',
+#       x='Characteristic group',
+#       fill='Tag cluster')
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+# explore variables by h clusters
+
+mean <- clusters_final.all %>% 
+  select(views, comments_per_view, languages, duration, title_length, cluster.split1) %>%
+  group_by(cluster.split1) %>%
+  summarise(views=mean(views),
+            comments_per_view=mean(comments_per_view),
+            languages=mean(languages),
+            title_length=mean(title_length)) %>%
+  ungroup()
+
+summary <- clusters_final.all %>% 
+  select(views, comments_per_view, languages, duration, title_length, cluster.split1) %>%
+  group_by(cluster.split1) %>%
+  summarise(views_sd=sd(views),
+            comments_per_view_sd=sd(comments_per_view),
+            languages_sd=sd(languages),
+            title_length_sd=sd(title_length)) %>%
+  ungroup() %>%
+  full_join(mean, by='cluster.split1')
+
+names(summary)[names(summary)=='cluster.split1'] <- 'Cluster'
+pander(summary[ , order(names(summary))])
+
+plot_data <- clusters_final.all %>% 
+  mutate(views_log = log(views)) %>%
+  select(views, views_log, comments_per_view, languages, duration, title_length, cluster.split1) %>%
+  gather('var', 'value', c(1:6))
+  
+cluster_plot <- function(variable){
+  plot <- plot_data %>% 
+    filter(var == variable) %>%
+    ggplot(aes(x=value, y=cluster.split1)) +
+    geom_density_ridges_gradient() +
+    scale_fill_continuous() +
+    labs(y='',
+         x=paste(variable)) +
+    theme_bw()
+  return(plot)
+}
+
+p1 <- cluster_plot('views')
+p2 <- cluster_plot('views_log')
+p3 <- cluster_plot('comments_per_view')
+p4 <- cluster_plot('languages')
+p5 <- cluster_plot('duration')
+p6 <- cluster_plot('title_length')
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow=3, ncol=2, 
+             left='Tag cluster')
+```
+
+
+# sentiment analysis
+
+```{r, warning=FALSE, message=FALSE}
+
+## prep transcript data
+
+ted_corpus <- VCorpus(VectorSource(ted_transcripts$transcript)) %>% # convert to corpus
+  tm_map(removeWords, stopwords("english")) %>% # clean up
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+
+ted_txt <- tidytext::tidy(ted_corpus) %>%
+  mutate(talk_id = ted_transcripts$talk_id) %>%
+  mutate(total_words = str_count(text, " ") + 1)
+```
+
+LOUGHRAN: calculate occurence various sentiments
+```{r, warning=FALSE, message=FALSE}
+##### LOUGHRAN
+
+get_sentiment_loughran <- function(row_n){
+  temp_txt <- ted_txt[row_n,]
+  tidy_temp_text <- temp_txt %>%
+    select(text, id) %>%
+    group_by(id) %>% 
+    unnest_tokens(word, text) %>%
+    ungroup() %>% # you can experiment with not including this when you compute count()
+    anti_join(stop_words, by='word') 
+  
+  temp_result <- tidy_temp_text %>%
+    inner_join(get_sentiments("loughran"), by='word') %>%
+    count(id, sentiment, word) %>%
+    ungroup() %>%
+    group_by(sentiment) %>%
+    summarize(words = sum(n)) %>%
+    mutate(id = row_n)
+  return(temp_result)
+}
+
+# run on first talk to create df
+ted_sentiment <- get_sentiment_loughran(1)
+# run across all other talks and append to df
+for (i in c(2:as.integer(count(ted_txt)))){
+  data_temp <- get_sentiment_loughran(i)
+  ted_sentiment <- rbind(ted_sentiment, data_temp)
+}
+
+ted_sentiment <- ted_sentiment %>%
+  spread(sentiment, words)
+
+ted_sentiment[is.na(ted_sentiment)] <- 0
+
+ted_sentiment.loughran <- (ted_sentiment / rowSums(ted_sentiment) * 100) %>%
+  mutate(talk_id = ted_sentiment$id) %>%
+  select(-id)
+```
+
+
+plot sentiment and views
+
+```{r, warning=FALSE, message=FALSE}
+# plot sentiment and views
+
+ted_sentiment.loughran %>% gather('sentiment', 'count', c(positive, negative)) %>%
+  left_join(ted_data, by='talk_id') %>%
+  ggplot(aes(x=log(count), y=log(views), colour=sentiment)) +
+  geom_jitter(size=0.5) +
+  scale_colour_manual(labels=c('Negative', 'Positive'), 
+                      values=c("#D55E00", "#0072B2")) +
+  theme_bw()
+
+# look at sentiment by clusters (tags, hierarchical)
+ted_sentiment.loughran %>% 
+  left_join(select(clusters_final, cluster, talk_id), by='talk_id') %>%
+  gather(sentiment, sent_score, c(1:6)) %>%
+  group_by(cluster, sentiment) %>%
+  mutate(sent_mean = mean(sent_score)) %>%
+  ungroup() %>%
+  select(-sent_score, -talk_id) %>%
+  distinct() %>%
+  spread(sentiment, sent_mean) %>%
+  pander()
+
+ted_sentiment.loughran %>% 
+  gather('sentiment', 'percent', c(1:6)) %>%
+  left_join(select(clusters_final.all, cluster.split1, talk_id), by='talk_id') %>%
+  ggplot(aes(x=sentiment, y=log(percent+0.1), fill=cluster.split1)) +
+  geom_boxplot() + 
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  coord_flip() +
+  theme_bw() +
+  scale_fill_manual(labels=c('1', '2', '3', '4', '5', '6', '7'), 
+                      values=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                               "#D55E00", "#CC79A7")) +
+  labs(title = 'Ratings by Tag Cluster',
+       y='Sentiment Frequency in Percent (ln)',
+       x='Sentiment',
+       fill='Tag cluster')
+```
+
+
+# TF-IDF
+
+```{r, message=FALSE, warning=FALSE}
+####
+## TF-IDF analysis
+# https://www.tidytextmining.com/tfidf.html
+######
+########
+###### do the same for DESCRIPTIONS
+######
+
+##### 7
+# most important words in descriptions
+
+description_words.cluster <- ted_data %>%
+  select(description, talk_id) %>%
+  left_join(select(clusters_final.all, cluster.split1, talk_id), by='talk_id') %>%
+  mutate(cluster=cluster.split1) %>%
+  unnest_tokens(word, description) %>%
+  count(cluster, word, sort = TRUE) %>%
+  group_by(cluster) %>%
+  mutate(cluster_total = sum(n)) %>%
+  ungroup()
+
+# word appearance by clusters
+ggplot(description_words.cluster, aes(n/cluster_total, fill=cluster)) +
+  geom_histogram(show.legend = FALSE, bins=50) +
+  xlim(NA, 0.0025) +
+  facet_wrap(~cluster, ncol=2, scales="free") +
+  theme_bw() +
+  scale_fill_manual(labels=c('1', '2', '3', '4', '5', '6', '7'), 
+                      values=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                               "#D55E00", "#CC79A7")) +
+  labs(title='Word Frequencies by Tag Cluster',
+       x='Word Frequency to Total Words Ratio',
+       y='')
+
+# Zipf's law states that the frequency that a word appears is inversely proportional to its rank
+freq_by_rank <- description_words.cluster %>% 
+  group_by(cluster) %>% 
+  mutate(rank = row_number(), 
+         term_frequency = n/cluster_total)
+
+# fit power law line
+pl <- lm(log10(term_frequency) ~ log10(rank), data=freq_by_rank)
+
+freq_by_rank %>% 
+  ggplot(aes(rank, term_frequency, colour = cluster)) + 
+  geom_abline(intercept=pl$coefficients[1], slope=pl$coefficients[2], color = "gray50", linetype = 2) + 
+  geom_line(size=0.5)+ 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_bw() +
+  scale_colour_manual(labels=c('1', '2', '3', '4', '5', '6', '7'), 
+                      values=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                               "#D55E00", "#CC79A7")) +
+  labs(title='Word Rank by Frequency',
+       x='Word Rank',
+       y='Term Frequency',
+       colour='Tag cluster')
+
+# The bind_tf_idf function in the tidytext package takes a tidy text dataset as input with one row per token (term), per document.
+# the higher the td_idf the more important the word; takes into account words that appear frequently in one but not across talks
+description_words.cluster.bound <- description_words.cluster %>%
+  bind_tf_idf(word, cluster, n) %>%
+  select(-cluster_total) %>%
+  arrange(cluster, -tf_idf) %>%
+  mutate(cluster2 = cluster[6])
+
+# visualise most important words
+wordfreq_by_cluster <- function(n_cluster, top_words) {
+  temp_plot <- description_words.cluster.bound %>%
+    filter(cluster == n_cluster) %>%
+    mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+    group_by(cluster) %>% 
+    top_n(top_words, tf_idf) %>% 
+    arrange(desc(tf_idf)) %>%
+    ungroup() %>%
+    ggplot(aes(x=reorder(word, tf_idf), y=tf_idf, fill=cluster)) +
+    geom_col(show.legend = FALSE, fill='darkgrey') +
+    labs(x = NULL, y = "tf-idf") +
+    coord_flip() +
+    theme_bw() +
+    labs(title=paste('Tag cluster', str_sub(n_cluster,-1,-1)),
+         y='')
+  return(temp_plot)
+}
+
+p1 <- wordfreq_by_cluster('group 1', 10)
+p2 <- wordfreq_by_cluster('group 2', 10)
+p3 <- wordfreq_by_cluster('group 3', 10)
+p4 <- wordfreq_by_cluster('group 4', 10)
+p5 <- wordfreq_by_cluster('group 5', 10)
+p6 <- wordfreq_by_cluster('group 6', 10)
+p7 <- wordfreq_by_cluster('group 7', 10)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, nrow=3, ncol=3,
+             bottom='TF-IDF Score')
+```
+
+
+
+
+```{r, warning=FALSE, message=FALSE}
+clusters <- cluster_lookup
+
+rf_data <- clusters_final.all %>%
+  left_join(ratings_percent, by='talk_id') %>%
+  left_join(ted_sentiment.loughran, by='talk_id')
+
+data <- rf_data %>%
+  gather(characteristic, value, c(28:41)) %>%
+  left_join(clusters, by='characteristic') %>%
+  select(-characteristic) %>%
+  filter(!is.na(cluster_pca)) %>%
+  group_by(talk_id, cluster_pca) %>%
+  mutate(value=sum(value)) %>%
+  distinct() %>%
+  spread(cluster_pca, value) %>%
+  ungroup()
+
+my_vars.views <- c('views', 'cuts', 'comments_per_view', 'published_year', 'languages', 
+             'Cluster_1', 'Cluster_2', 'Cluster_3', 'Cluster_4', 'description_length', 
+             'title_length', 'negative', 'positive')
+
+my_data <- select(data, my_vars.views) %>%
+  mutate(cuts = paste('Group', cuts, sep='_'),
+         dummy = 1) %>%
+  spread(cuts, dummy)
+my_data[is.na(my_data)] <- 0
+
+set.seed(2)
+tree.views <- tree::tree(views~., my_data)
+
+summary(tree.views)
+
+tree.views
+
+plot(tree.views)
+text(tree.views, pretty=0)
+
+# cv consideres the number of end nodes!
+cv.views <- cv.tree(tree.views)
+plot(cv.views$size, cv.views$dev, type='b')
+
+train <- sample(1:nrow(my_data), nrow(my_data)/1.25)
+tree.views <- tree(views~., data=my_data, subset=train)
+summary(tree.views)
+
+# pruning
+prune.views <- prune.tree(tree.views, best=5)
+plot(prune.views)
+text(prune.views, pretty=0)
+
+yhat <- predict(tree.views, newdata=my_data[-train,])
+views.test <- my_data[-train, 'views']
+plot(yhat, views.test$views)
+abline(0,1)
+mean((yhat-views.test$views)^2)^(1/2)
+mean((abs(yhat-views.test$views)/yhat)*100)
+
+# bagging
+set.seed(1)
+#my_data <- mutate(my_data, views=log(views))
+bag.views <- randomForest(views~., data=my_data, subset=train,  mtry=13, importance=TRUE)
+bag.views
+
+yhat.bag <- predict(bag.views, newdata=my_data[-train,])
+mean((yhat.bag-views.test$views)^2)^(1/2)
+mean((abs(yhat.bag-views.test$views)/yhat.bag)*100)
+
+# random forest
+rf.views <- randomForest(views~., data=my_data, subset=train,  mtry=8, importance=TRUE)
+yhat.rf <- predict(rf.views, newdata=my_data[-train,])
+mean((yhat.rf-views.test$views)^2)^(1/2)
+mean((abs(yhat.rf-views.test$views)/yhat.rf)*100)
+
+
+importance(rf.views)
+importance(bag.views)
+```
